@@ -1,0 +1,1 @@
+/Users/matias/projects/agentic-config/core/commands/claude/o_spec.md

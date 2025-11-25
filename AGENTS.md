@@ -1,0 +1,32 @@
+# Project Guidelines
+
+## Environment & Tooling
+- **Package Manager:** `uv` - Run `uv sync` to setup dependencies
+- **Type Checking:** `uv run pyright` - Static type checker for Python
+- **Linting:** `uv run ruff check [--fix] <path>` - Fast Python linter
+- **Formatting:** `uv run ruff format <path>` - Code formatter
+- **Testing:** `uv run pytest` - Unit and integration tests
+
+## Style & Conventions
+- **Python:** Type hints for all public functions, descriptive names, small pure functions
+- **Types:** Use `typing` module; prefer Protocol over ABC; use TypedDict for dicts
+- At each /spec stage run `ruff check --fix` + `pyright` on touched files
+
+## Core Principles
+- Verify over assume: Always double-check, research patterns first
+- Failures first: Lead with errors, no optimistic language with failures
+- Always re-raise: Never swallow exceptions - let them propagate
+
+## Workflow
+- Planning: Announce "🔒 PLANNING MODE", create spec, STOP
+- TodoWrite: Multi-step tasks, mark in_progress → completed immediately
+- After edits: Run `uv run pyright && uv run ruff check --fix [file]`
+
+## Git Rules
+- Never work on `main`
+- NEVER amend commits unless explicitly requested with "amend commit" phrase
+- One stage = one commit: `spec(<NNN>): <STAGE> - <short_title>`
+- Commit messages: imperative, scoped, precise
+
+## CUSTOMIZE BELOW THIS LINE
+<!-- Add project-specific guidelines, architecture notes, and conventions here -->

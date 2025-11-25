@@ -1,0 +1,21 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.bak
+.agentic-config.backup.*
+
+# Testing
+/test-projects/
+
+# Installation tracking
+.installations.json

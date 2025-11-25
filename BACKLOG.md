@@ -1,0 +1,9 @@
+- [ ] ADD /spec PATCH command (MIRROR TAC-6) (https://agenticengineer.com/tactical-agentic-coding/course/let-your-agents-focus)
+- [ ] ADD /conditional-docs command (MIRROR TAC-6) (https://agenticengineer.com/tactical-agentic-coding/course/let-your-agents-focus)
+- [ ] SIMPLIFY AGENTS.MD
+- [ ] IMPROVE `REVIEW` stage to add (in order)
+  - [ ] web screenshots
+  - [ ] ios screenshots
+  - [ ] android screenshots
+  - [ ] * videos
+- [ ] ADD skill to READ logs from web/ios/android for agenting E2E testing & reviewing code changes

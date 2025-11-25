@@ -1,0 +1,1 @@
+/Users/matias/projects/agentic-config/core/agents/agentic-status.md
