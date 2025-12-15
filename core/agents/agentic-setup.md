@@ -55,12 +55,19 @@ Show what will happen:
 ```
 
 **--extras flag**: Installs project-agnostic commands and skills:
-- Commands: `/orc`, `/spawn`, `/squash`, `/pull_request`, `/gh_pr_review`
+- Commands: `/orc`, `/spawn`, `/squash`, `/pull_request`, `/gh_pr_review`, `/adr`
 - Skills: `agent-orchestrator-manager`, `single-file-uv-scripter`, `command-writer`, `skill-writer`, `git-find-fork`
+
+**Automatic setup actions** (v1.1.1+):
+- Creates `.gitignore` with sensible defaults if not present
+- Initializes git repository (`git init`) if not already a repo
 
 ### 5. Post-Installation Guidance
 - Verify symlinks created successfully: `ls -la agents .claude/commands`
-- Explain AGENTS.md customization: "Add project-specific content below 'CUSTOMIZE BELOW THIS LINE'"
+- Explain customization pattern (v1.1.1+):
+  - `AGENTS.md` contains template (receives updates)
+  - Create `PROJECT_AGENTS.md` for project-specific guidelines
+  - Claude reads both: template first, then project overrides
 - Suggest first test: `/spec RESEARCH <simple_spec_path>`
 - Show documentation: `~/projects/agentic-config/README.md`
 
@@ -82,3 +89,62 @@ If script fails:
 - Warn: "Never edit symlinked files - changes will be lost"
 - Suggest version control for project-specific customizations
 - Recommend testing /spec workflow immediately after setup
+
+## Post-Workflow Commit (Optional)
+
+After successful setup, offer to commit the agentic-config installation.
+
+### 1. Identify Changed Files
+```bash
+git status --porcelain
+```
+
+### 2. Filter to Setup Files
+Only stage files created/modified by setup:
+- `.agentic-config.json`
+- `AGENTS.md`
+- `PROJECT_AGENTS.md` (if exists)
+- `.gitignore` (if created)
+- `agents/` (symlink)
+- `.claude/` directory
+- `.gemini/` directory
+- `.codex/` directory
+- `.agent/` directory
+- `CLAUDE.md` (symlink to AGENTS.md)
+- `GEMINI.md` (symlink to AGENTS.md)
+
+### 3. Offer Commit Option
+Use AskUserQuestion:
+- **Question**: "Commit agentic-config setup?"
+- **Options**:
+  - "Yes, commit now" (Recommended) → Commits setup files
+  - "No, I'll commit later" → Skip commit
+  - "Show changes first" → Run `git status` and `git diff --staged` then re-ask
+
+**Note**: In auto-approve/yolo mode, default to "Yes, commit now".
+
+### 4. Execute Commit
+If user confirms:
+```bash
+# Stage only setup-related files
+git add .agentic-config.json AGENTS.md agents/ .claude/ .gemini/ .codex/ .agent/
+git add CLAUDE.md GEMINI.md 2>/dev/null || true
+git add PROJECT_AGENTS.md 2>/dev/null || true
+git add .gitignore 2>/dev/null || true
+
+# Commit with descriptive message
+git commit -m "chore(agentic): setup agentic-config v$(jq -r .version .agentic-config.json)
+
+- Install centralized workflow system
+- Add /spec command and AI tool integrations
+- Configure project type: $(jq -r .project_type .agentic-config.json)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>"
+```
+
+### 5. Report Result
+- Show commit hash if successful
+- Confirm files committed
+- Remind user to push when ready

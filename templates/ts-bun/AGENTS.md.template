@@ -1,0 +1,42 @@
+# Project Guidelines
+
+## Environment & Tooling
+- **Package Manager:** bun
+- **Type Checking:** tsc --noEmit (never tsc alone)
+- **Linting:** eslint <path> [--fix]
+- **Build:** Only when explicitly requested
+
+## Style & Conventions
+- TypeScript strict mode, functional components, explicit types (no any)
+- After edits: eslint --fix <file> && tsc --noEmit
+
+## Core Principles
+- Verify over assume
+- Failures first (lead with errors)
+- Always re-raise (never swallow exceptions)
+- DO NOT OVERCOMPLICATE
+- DO NOT OVERSIMPLIFY
+
+## Critical Rules
+- NEVER amend commits unless user says 'amend commit'
+- NEVER commit files in gitignored directories unless explicitly requested - DO NOT use git add -f to bypass .gitignore
+- Minimal changes; avoid ambiguity; no placeholders
+- Keep prompts concise; log costs
+- EFFICIENCY in application performance and user experience - REFLECT this in EVERY implementation
+
+## /spec Workflow
+Reference agents/spec/{STAGE}.md for detailed instructions.
+- Default path: specs/<YYYY>/<MM>/<branch>/<NNN>-<title>.md
+- Modify AI Section only; never touch Human Section
+- Commit after each stage: spec(<NNN>): <STAGE> - <title>
+
+## Git Workflow
+- Base branch: main (not master)
+- git status returns CWD-relative paths - use those exact paths with git add
+- Never commit to main; never amend unless 'amend commit' explicitly requested
+- One stage = one commit: spec(<NNN>): <STAGE> - <title>
+
+## Project-Specific Instructions
+READ @PROJECT_AGENTS.md for project-specific instructions - CRITICAL COMPLIANCE
+
+<!-- PROJECT_AGENTS.md contains project-specific guidelines that override defaults -->

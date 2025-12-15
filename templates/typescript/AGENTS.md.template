@@ -1,33 +1,42 @@
 # Project Guidelines
 
 ## Environment & Tooling
-- **Package Manager:** `pnpm` - Run `pnpm install` to setup dependencies
-- **Type Checking:** `tsc --noEmit` - TypeScript compiler in check-only mode (DO NOT use `tsc` alone)
-- **Linting:** `eslint <path> [--fix]` - JavaScript/TypeScript linting
-- **Formatting:** `prettier --write <path>` - Code formatting (if configured)
-- **Build:** DO NOT run `pnpm build` or `vite build` automatically. Only build when explicitly requested
-- **Testing:** `vitest` (if configured) - Unit test pure logic, integration test components/hooks
+- **Package Manager:** pnpm
+- **Type Checking:** tsc --noEmit (never tsc alone)
+- **Linting:** eslint <path> [--fix]
+- **Build:** Only when explicitly requested
 
 ## Style & Conventions
-- **TypeScript/React:** Functional components, TypeScript strict mode, descriptive names, small deterministic functions
-- **Types:** Prefer explicit types; avoid `any`; use interfaces for objects, type aliases for unions
-- At each /spec stage run `eslint --fix` + `tsc --noEmit` on touched files
+- TypeScript strict mode, functional components, explicit types (no any)
+- After edits: eslint --fix <file> && tsc --noEmit
 
 ## Core Principles
-- Verify over assume: Always double-check, research patterns first
-- Failures first: Lead with errors, no optimistic language with failures
-- Always re-raise: Never swallow exceptions - let them propagate
+- Verify over assume
+- Failures first (lead with errors)
+- Always re-raise (never swallow exceptions)
+- DO NOT OVERCOMPLICATE
+- DO NOT OVERSIMPLIFY
 
-## Workflow
-- Planning: Announce "🔒 PLANNING MODE", create spec, STOP
-- TodoWrite: Multi-step tasks, mark in_progress → completed immediately
-- After edits: Run `tsc --noEmit && eslint --fix [file]`
+## Critical Rules
+- NEVER amend commits unless user says 'amend commit'
+- NEVER commit files in gitignored directories unless explicitly requested - DO NOT use git add -f to bypass .gitignore
+- Minimal changes; avoid ambiguity; no placeholders
+- Keep prompts concise; log costs
+- EFFICIENCY in application performance and user experience - REFLECT this in EVERY implementation
 
-## Git Rules
-- Never work on `main`
-- NEVER amend commits unless explicitly requested with "amend commit" phrase
-- One stage = one commit: `spec(<NNN>): <STAGE> - <short_title>`
-- Commit messages: imperative, scoped, precise
+## /spec Workflow
+Reference agents/spec/{STAGE}.md for detailed instructions.
+- Default path: specs/<YYYY>/<MM>/<branch>/<NNN>-<title>.md
+- Modify AI Section only; never touch Human Section
+- Commit after each stage: spec(<NNN>): <STAGE> - <title>
 
-## CUSTOMIZE BELOW THIS LINE
-<!-- Add project-specific guidelines, architecture notes, and conventions here -->
+## Git Workflow
+- Base branch: main (not master)
+- git status returns CWD-relative paths - use those exact paths with git add
+- Never commit to main; never amend unless 'amend commit' explicitly requested
+- One stage = one commit: spec(<NNN>): <STAGE> - <title>
+
+## Project-Specific Instructions
+READ @PROJECT_AGENTS.md for project-specific instructions - CRITICAL COMPLIANCE
+
+<!-- PROJECT_AGENTS.md contains project-specific guidelines that override defaults -->

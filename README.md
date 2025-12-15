@@ -78,13 +78,14 @@ AGENTIC_CONFIG_PATH=~/custom/path ./scripts/install-global.sh
 | Type | Package Manager | Type Checker | Linter |
 |------|----------------|--------------|--------|
 | **typescript** | pnpm | tsc | eslint |
+| **ts-bun** | bun | tsc | eslint |
 | **python-poetry** | poetry | pyright | ruff |
 | **python-uv** | uv | pyright | ruff |
 | **python-pip** | pip | mypy | pylint |
 | **rust** | cargo | cargo check | clippy |
 | **generic** | custom | custom | custom |
 
-Project type is auto-detected or can be specified with `--type` flag.
+Project type is auto-detected (via lockfiles/config files) or can be specified with `--type` flag.
 
 ## Architecture
 
@@ -165,6 +166,38 @@ cd ~/projects/my-app
 ~/projects/agentic-config/scripts/update-config.sh --force .
 ```
 
+### Optional Extras (Project-Agnostic Commands & Skills)
+
+Install additional commands and skills with `--extras` flag:
+
+```bash
+# During setup
+~/projects/agentic-config/scripts/setup-config.sh --extras ~/projects/my-app
+
+# Or during update
+~/projects/agentic-config/scripts/update-config.sh --extras ~/projects/my-app
+```
+
+**Available commands:**
+- `/adr` - Architecture Decision Records with auto-numbering
+- `/orc` - Orchestrate multi-agent tasks
+- `/spawn` - Spawn subagents with specific models
+- `/squash` - Squash commits intelligently
+- `/pull_request` - Create GitHub PRs with comprehensive descriptions
+- `/gh_pr_review` - Review GitHub PRs with multi-agent orchestration
+
+**Available skills:**
+- `agent-orchestrator-manager` - Multi-agent delegation workflows
+- `single-file-uv-scripter` - Self-contained Python scripts with UV
+- `command-writer` - Create custom slash commands
+- `skill-writer` - Author Claude Code skills
+- `git-find-fork` - Find true merge-base/fork-point
+
+**New in v1.1.1:**
+- Auto-creates `.gitignore` with sensible defaults
+- Auto-runs `git init` if not already a repository
+- Cleans up orphaned symlinks on update
+
 ### Customization
 
 #### File Behavior by Type
@@ -178,35 +211,49 @@ cd ~/projects/my-app
 - `AGENTS.md` - Project-specific guidelines (customize freely)
 - `.agent/config.yml` - Rarely needs changes (use template defaults when possible)
 
-#### AGENTS.md: Safe Customization
+#### AGENTS.md: Safe Customization with PROJECT_AGENTS.md
 
-Template has built-in separation for safe updates:
+**New in v1.1.1:** Separation of template from project customizations
 
+- `AGENTS.md` - Template with standard guidelines (receives updates)
+- `PROJECT_AGENTS.md` - Project-specific overrides (never touched by updates)
+
+**How it works:**
 ```markdown
+# AGENTS.md (template)
 ## Core Principles
-[Standard section - updated by central repo]
+- Verify over assume
+- Failures first
+- DO NOT OVERCOMPLICATE
 
-## Workflow
-[Standard section - updated by central repo]
+## Project-Specific Instructions
+READ @PROJECT_AGENTS.md for project-specific instructions - CRITICAL COMPLIANCE
+```
 
-## CUSTOMIZE BELOW THIS LINE
-<!-- Your project-specific content - NEVER touched by updates -->
+**PROJECT_AGENTS.md** (your customizations):
+```markdown
+# Project-Specific Guidelines
 
-### API Structure
+## API Structure
 - REST endpoints in src/api/
 - GraphQL resolvers in src/graphql/
 - Authentication via JWT in middleware/
 
-### Testing Strategy
+## Testing Strategy
 - Unit tests colocated with implementation
 - Integration tests in tests/integration/
 - E2E tests use Playwright
 ```
 
-**Update safety:**
-- `update-config.sh` checks only first ~20 lines (template section)
-- Your custom content below the marker is **preserved across all updates**
-- Diffs show only template section changes
+**Migration:**
+- Run `update-config.sh --force` to auto-migrate existing customizations
+- Content below "CUSTOMIZE BELOW THIS LINE" moves to PROJECT_AGENTS.md
+- AGENTS.md replaced with latest template
+
+**Benefits:**
+- Clean updates without merge conflicts
+- Explicit separation of concerns
+- PROJECT_AGENTS.md always takes precedence
 
 #### .agent/config.yml: Minimal Customization
 

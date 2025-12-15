@@ -15,6 +15,7 @@ The agent will:
 5. Offer update options (force/manual/skip)
 6. Execute update
 7. Validate post-update
+8. Offer to commit update changes
 
 Symlinked files (workflows, commands) update automatically.
 Copied files (AGENTS.md, config.yml) may need review.

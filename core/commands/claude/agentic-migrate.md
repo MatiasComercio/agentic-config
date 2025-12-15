@@ -14,5 +14,6 @@ The agent will:
 4. Create backup of existing files
 5. Convert to centralized management
 6. Guide manual merge of custom content
+7. Offer to commit migration changes
 
 Use this to convert projects with manually-installed agentic configurations to the centralized system.

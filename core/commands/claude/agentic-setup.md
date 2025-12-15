@@ -14,5 +14,6 @@ The agent will:
 4. Execute setup with appropriate configuration
 5. Validate installation
 6. Guide initial customization
+7. Offer to commit setup changes
 
 Use this to install agentic-config workflows and tools in a new or existing project.

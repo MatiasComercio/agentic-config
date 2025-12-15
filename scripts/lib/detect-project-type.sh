@@ -4,6 +4,12 @@
 detect_project_type() {
   local target_path="$1"
 
+  # Bun indicators (check before typescript for specificity)
+  if [[ -f "$target_path/bun.lockb" ]]; then
+    echo "ts-bun"
+    return 0
+  fi
+
   # TypeScript/Node.js indicators
   if [[ -f "$target_path/package.json" ]]; then
     local pkg_content=$(cat "$target_path/package.json" 2>/dev/null || echo "")

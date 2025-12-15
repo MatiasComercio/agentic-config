@@ -10,6 +10,37 @@ LATEST_VERSION=$(cat "$REPO_ROOT/VERSION")
 # Source utilities
 source "$SCRIPT_DIR/lib/version-manager.sh"
 
+# Dynamically discover available extras from core directory
+# Commands: all .md files in core/commands/claude/ EXCEPT core files (spec, agentic-*, o_spec)
+discover_available_commands() {
+  local cmds=()
+  for f in "$REPO_ROOT/core/commands/claude/"*.md; do
+    [[ ! -f "$f" ]] && continue
+    local name=$(basename "$f" .md)
+    # Skip core commands (always installed during setup, not extras)
+    case "$name" in
+      spec|agentic|agentic-*|o_spec) continue ;;
+    esac
+    cmds+=("$name")
+  done
+  echo "${cmds[@]}"
+}
+
+# Skills: all directories in core/skills/
+discover_available_skills() {
+  local skills=()
+  for d in "$REPO_ROOT/core/skills/"*/; do
+    [[ ! -d "$d" ]] && continue
+    local name=$(basename "$d")
+    skills+=("$name")
+  done
+  echo "${skills[@]}"
+}
+
+# Discover extras dynamically (no hardcoded lists!)
+AVAILABLE_CMDS=($(discover_available_commands))
+AVAILABLE_SKILLS=($(discover_available_skills))
+
 # Defaults
 FORCE=false
 INSTALL_EXTRAS=false
@@ -60,6 +91,59 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# Function to clean up orphaned symlinks
+cleanup_orphan_symlinks() {
+  local target="$1"
+  local dir="$2"
+  local removed=0
+
+  if [[ -d "$target/$dir" ]]; then
+    for link in "$target/$dir"/*; do
+      if [[ -L "$link" && ! -e "$link" ]]; then
+        rm "$link"
+        echo "  🟡 Removed orphan: $(basename "$link")"
+        ((removed++)) || true
+      fi
+    done
+  fi
+  echo "$removed"
+}
+
+# Function to migrate customizations to PROJECT_AGENTS.md
+migrate_to_project_agents() {
+  local target="$1"
+  local agents_file="$target/AGENTS.md"
+  local project_file="$target/PROJECT_AGENTS.md"
+
+  # Skip if PROJECT_AGENTS.md already exists
+  [[ -f "$project_file" ]] && return 0
+
+  # Skip if AGENTS.md doesn't exist
+  [[ ! -f "$agents_file" ]] && return 0
+
+  # Check if AGENTS.md has customization marker
+  local marker_line=$(grep -n "CUSTOMIZE BELOW THIS LINE" "$agents_file" 2>/dev/null | cut -d: -f1)
+  [[ -z "$marker_line" ]] && return 0
+
+  # Extract content after marker (skip marker line + 1 comment line)
+  local total_lines=$(wc -l < "$agents_file")
+  local content_start=$((marker_line + 2))
+
+  # Skip if no content after marker
+  [[ $content_start -ge $total_lines ]] && return 0
+
+  # Extract content and check if it's substantial (not just comments)
+  local custom_content=$(tail -n +$content_start "$agents_file" | grep -v '^$' | grep -v '^<!--' | head -20)
+  [[ -z "$custom_content" ]] && return 0
+
+  # Has real customizations - migrate
+  echo "🔵 Migrating customizations to PROJECT_AGENTS.md..."
+  tail -n +$content_start "$agents_file" > "$project_file"
+  echo "🟢 Migration complete: customizations preserved in PROJECT_AGENTS.md"
+
+  return 0
+}
 
 # Validate
 if [[ ! -d "$TARGET_PATH" ]]; then
@@ -151,8 +235,12 @@ if [[ "$CURRENT_VERSION" != "$LATEST_VERSION" ]]; then
     echo ""
 
     if [[ "$FORCE" == true ]]; then
+      # Migrate customizations to PROJECT_AGENTS.md if needed
+      migrate_to_project_agents "$TARGET_PATH"
+
       echo "🔵 Force updating templates..."
       [[ "$HAS_CONFIG_CHANGES" == true ]] && cp "$TEMPLATE_DIR/.agent/config.yml.template" "$TARGET_PATH/.agent/config.yml"
+      [[ "$HAS_AGENTS_CHANGES" == true ]] && cp "$TEMPLATE_DIR/AGENTS.md.template" "$TARGET_PATH/AGENTS.md"
       echo "🟢 Templates updated"
     else
       echo "To view changes:"
@@ -182,9 +270,10 @@ fi
 if [[ "$INSTALL_EXTRAS" == true ]]; then
   echo ""
   echo "🔵 Installing project-agnostic commands..."
+  echo "   Available: ${AVAILABLE_CMDS[*]}"
   mkdir -p "$TARGET_PATH/.claude/commands"
   CMDS_INSTALLED=0
-  for cmd in orc spawn squash squash_commit pull_request gh_pr_review; do
+  for cmd in "${AVAILABLE_CMDS[@]}"; do
     if [[ -f "$REPO_ROOT/core/commands/claude/$cmd.md" ]]; then
       if [[ ! -L "$TARGET_PATH/.claude/commands/$cmd.md" ]]; then
         ln -sf "$REPO_ROOT/core/commands/claude/$cmd.md" "$TARGET_PATH/.claude/commands/$cmd.md"
@@ -196,9 +285,10 @@ if [[ "$INSTALL_EXTRAS" == true ]]; then
   [[ $CMDS_INSTALLED -eq 0 ]] && echo "  (all commands already installed)"
 
   echo "🔵 Installing project-agnostic skills..."
+  echo "   Available: ${AVAILABLE_SKILLS[*]}"
   mkdir -p "$TARGET_PATH/.claude/skills"
   SKILLS_INSTALLED=0
-  for skill in agent-orchestrator-manager single-file-uv-scripter command-writer skill-writer git-find-fork; do
+  for skill in "${AVAILABLE_SKILLS[@]}"; do
     if [[ -d "$REPO_ROOT/core/skills/$skill" ]]; then
       if [[ ! -L "$TARGET_PATH/.claude/skills/$skill" ]]; then
         ln -sf "$REPO_ROOT/core/skills/$skill" "$TARGET_PATH/.claude/skills/$skill"
@@ -208,6 +298,20 @@ if [[ "$INSTALL_EXTRAS" == true ]]; then
     fi
   done
   [[ $SKILLS_INSTALLED -eq 0 ]] && echo "  (all skills already installed)"
+
+  # Clean up orphaned symlinks
+  echo "🔵 Cleaning up orphaned symlinks..."
+  ORPHANS=$(cleanup_orphan_symlinks "$TARGET_PATH" ".claude/commands")
+  if [[ $ORPHANS -gt 0 ]]; then
+    echo "  Cleaned $ORPHANS orphan command symlink(s)"
+  else
+    echo "  (no orphans found)"
+  fi
+
+  ORPHANS=$(cleanup_orphan_symlinks "$TARGET_PATH" ".claude/skills")
+  if [[ $ORPHANS -gt 0 ]]; then
+    echo "  Cleaned $ORPHANS orphan skill symlink(s)"
+  fi
 
   # Update config to track extras installation
   jq '.extras_installed = true' \

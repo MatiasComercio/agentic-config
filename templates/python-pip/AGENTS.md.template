@@ -1,32 +1,42 @@
 # Project Guidelines
 
 ## Environment & Tooling
-- **Package Manager:** `pip` - Run `pip install -r requirements.txt` to setup dependencies
-- **Type Checking:** `mypy <path>` - Static type checker for Python
-- **Linting:** `pylint <path>` - Python code linter
-- **Formatting:** `black <path>` - Code formatter (if configured)
-- **Testing:** `pytest` - Unit and integration tests
+- **Package Manager:** pip
+- **Type Checking:** mypy <path>
+- **Linting:** pylint <path>
+- **Build:** Only when explicitly requested
 
 ## Style & Conventions
-- **Python:** Type hints for all public functions, descriptive names, small pure functions
-- **Types:** Use `typing` module; prefer Protocol over ABC; use TypedDict for dicts
-- At each /spec stage run `pylint` + `mypy` on touched files
+- Type hints for all public functions, descriptive names, small pure functions
+- After edits: pylint <file> && mypy <file>
 
 ## Core Principles
-- Verify over assume: Always double-check, research patterns first
-- Failures first: Lead with errors, no optimistic language with failures
-- Always re-raise: Never swallow exceptions - let them propagate
+- Verify over assume
+- Failures first (lead with errors)
+- Always re-raise (never swallow exceptions)
+- DO NOT OVERCOMPLICATE
+- DO NOT OVERSIMPLIFY
 
-## Workflow
-- Planning: Announce "🔒 PLANNING MODE", create spec, STOP
-- TodoWrite: Multi-step tasks, mark in_progress → completed immediately
-- After edits: Run `mypy [file] && pylint [file]`
+## Critical Rules
+- NEVER amend commits unless user says 'amend commit'
+- NEVER commit files in gitignored directories unless explicitly requested - DO NOT use git add -f to bypass .gitignore
+- Minimal changes; avoid ambiguity; no placeholders
+- Keep prompts concise; log costs
+- EFFICIENCY in application performance and user experience - REFLECT this in EVERY implementation
 
-## Git Rules
-- Never work on `main`
-- NEVER amend commits unless explicitly requested with "amend commit" phrase
-- One stage = one commit: `spec(<NNN>): <STAGE> - <short_title>`
-- Commit messages: imperative, scoped, precise
+## /spec Workflow
+Reference agents/spec/{STAGE}.md for detailed instructions.
+- Default path: specs/<YYYY>/<MM>/<branch>/<NNN>-<title>.md
+- Modify AI Section only; never touch Human Section
+- Commit after each stage: spec(<NNN>): <STAGE> - <title>
 
-## CUSTOMIZE BELOW THIS LINE
-<!-- Add project-specific guidelines, architecture notes, and conventions here -->
+## Git Workflow
+- Base branch: main (not master)
+- git status returns CWD-relative paths - use those exact paths with git add
+- Never commit to main; never amend unless 'amend commit' explicitly requested
+- One stage = one commit: spec(<NNN>): <STAGE> - <title>
+
+## Project-Specific Instructions
+READ @PROJECT_AGENTS.md for project-specific instructions - CRITICAL COMPLIANCE
+
+<!-- PROJECT_AGENTS.md contains project-specific guidelines that override defaults -->

@@ -19,3 +19,6 @@ Thumbs.db
 
 # Installation tracking
 .installations.json
+
+# Orchestration outputs
+outputs/

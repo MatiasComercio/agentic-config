@@ -150,3 +150,56 @@ Offer to fix common issues automatically:
 **/spec command not found:**
 - Cause: .claude/commands/spec.md missing or broken
 - Fix: Recreate symlink or check Claude Code installation
+
+## Post-Fix Commit (Optional)
+
+After auto-fix completes successfully, offer to commit the fixes.
+
+### 1. Check If Fixes Were Applied
+Only offer commit if auto-fix mode was used and changes were made.
+
+### 2. Identify Fixed Files
+```bash
+git status --porcelain
+```
+
+Filter to agentic-config related files:
+- `.agentic-config.json`
+- `agents/` (symlink)
+- `.claude/`, `.gemini/`, `.codex/`, `.agent/`
+- `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`
+
+### 3. Offer Commit Option
+Use AskUserQuestion:
+- **Question**: "Commit validation fixes?"
+- **Options**:
+  - "Yes, commit fixes" (Recommended) → Commits repaired files
+  - "No, I'll review first" → Skip commit
+  - "Show what was fixed" → Display summary then re-ask
+
+**Note**: In auto-approve/yolo mode, default to "Yes, commit fixes".
+
+### 4. Execute Commit
+If user confirms:
+```bash
+# Stage fixed files
+git add .agentic-config.json 2>/dev/null || true
+git add agents/ .claude/ .gemini/ .codex/ .agent/ 2>/dev/null || true
+git add AGENTS.md CLAUDE.md GEMINI.md 2>/dev/null || true
+
+# Commit with descriptive message
+git commit -m "fix(agentic): repair agentic-config installation
+
+- Auto-fix broken symlinks
+- Repair configuration issues
+- Restore missing files
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>"
+```
+
+### 5. Report Result
+- Show commit hash if successful
+- List what was fixed
+- Confirm all validation checks now pass

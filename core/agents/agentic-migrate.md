@@ -79,22 +79,100 @@ rmdir .agentic-config.backup.<timestamp>
 
 ## Customization Merge Guide
 
-After migration, help user merge custom content:
+After migration, help user merge custom content using PROJECT_AGENTS.md pattern (v1.1.1+):
 
 1. **Read backup AGENTS.md:**
    ```bash
    cat .agentic-config.backup.<timestamp>/AGENTS.md
    ```
 
-2. **Identify custom sections** (content not in template)
+2. **Identify custom sections** (content not in standard template)
 
-3. **Add to new AGENTS.md below marker:**
-   - Open AGENTS.md
-   - Find "CUSTOMIZE BELOW THIS LINE"
-   - Paste custom content below marker
-   - Save
+3. **Create PROJECT_AGENTS.md with custom content:**
+   ```bash
+   # Extract and create PROJECT_AGENTS.md
+   # Paste custom content from backup
+   vi PROJECT_AGENTS.md
+   ```
 
-4. **Validate:**
-   - Read merged file
+   Example PROJECT_AGENTS.md:
+   ```markdown
+   # Project-Specific Guidelines
+
+   ## API Structure
+   - REST endpoints in src/api/
+   - Authentication via JWT
+
+   ## Testing Strategy
+   - Unit tests colocated with implementation
+   - Integration tests in tests/integration/
+   ```
+
+4. **Benefits of PROJECT_AGENTS.md:**
+   - Keeps AGENTS.md as updateable template
+   - Separates project customizations from template
+   - Claude reads both files (template first, then overrides)
+   - Future updates won't conflict with customizations
+
+5. **Validate:**
+   - Read PROJECT_AGENTS.md
    - Confirm customizations present
    - Test /spec workflow
+
+## Post-Workflow Commit (Optional)
+
+After successful migration, offer to commit the changes.
+
+### 1. Identify Changed Files
+```bash
+git status --porcelain
+```
+
+### 2. Filter to Migration Files
+Only stage files created/modified by migration:
+- `.agentic-config.json`
+- `AGENTS.md`
+- `PROJECT_AGENTS.md` (if created with customizations)
+- `agents/` (symlink replacing directory)
+- `.claude/` directory
+- `.gemini/` directory
+- `.codex/` directory
+- `.agent/` directory
+- `CLAUDE.md`, `GEMINI.md` (symlinks)
+
+**Note**: Do NOT commit backup directory (`.agentic-config.backup.*`)
+
+### 3. Offer Commit Option
+Use AskUserQuestion:
+- **Question**: "Commit agentic-config migration?"
+- **Options**:
+  - "Yes, commit now" (Recommended) → Commits migration
+  - "No, I'll commit later" → Skip commit
+  - "Show changes first" → Run `git status` then re-ask
+
+**Note**: In auto-approve/yolo mode, default to "Yes, commit now".
+
+### 4. Execute Commit
+If user confirms:
+```bash
+# Stage migration files (not backup)
+git add .agentic-config.json AGENTS.md agents/ .claude/ .gemini/ .codex/ .agent/
+git add CLAUDE.md GEMINI.md 2>/dev/null || true
+git add PROJECT_AGENTS.md 2>/dev/null || true
+
+# Commit with descriptive message
+git commit -m "chore(agentic): migrate to centralized agentic-config v$(jq -r .version .agentic-config.json)
+
+- Convert manual installation to centralized system
+- Replace local agents/ with symlink to central repo
+- Preserve customizations in PROJECT_AGENTS.md
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>"
+```
+
+### 5. Report Result
+- Show commit hash if successful
+- Remind: backup preserved at `.agentic-config.backup.<timestamp>`
+- Remind user to push when ready

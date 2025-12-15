@@ -52,6 +52,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Backups created automatically (`.agentic-config.backup.<timestamp>`)
 - Version 1.0.0 establishes baseline for all future updates
 
+## [1.1.1] - 2025-12-15
+
+### Added
+- **ts-bun template**: Bun package manager alternative for TypeScript projects
+- **/adr command**: Architecture Decision Records with auto-numbering
+  - Auto-creates `adrs/` directory and `000-index.md` if missing
+  - Project-agnostic (works in any project with agentic-config)
+  - Available via `--extras` flag in setup/update
+- **PROJECT_AGENTS.md pattern**: Separate template from customizations
+  - `AGENTS.md` = Template (updates with agentic-config)
+  - `PROJECT_AGENTS.md` = Project-specific overrides (never touched)
+  - Auto-migration on `--force` update
+- **Setup enhancements**:
+  - Auto-create `.gitignore` with sensible defaults
+  - Auto-run `git init` if not a repository
+- **Update enhancements**:
+  - Detect new available commands/skills
+  - Clean up orphaned symlinks automatically
+  - Migrate customizations to PROJECT_AGENTS.md on `--force`
+
+### Changed
+- All AGENTS.md templates simplified with unified structure:
+  - Added `/spec Workflow` section with detailed instructions
+  - Added `Git Workflow` section (base branch, path handling)
+  - Added `Critical Rules` section (gitignore enforcement, efficiency principle)
+  - Added `DO NOT OVERCOMPLICATE/OVERSIMPLIFY` to Core Principles
+  - Added `Project-Specific Instructions` section with PROJECT_AGENTS.md reference
+- `detect-project-type.sh` now detects `bun.lockb` for ts-bun template
+- Template line count increased from ~33 to ~43 lines (more comprehensive)
+
+### Migration Notes
+- Existing customizations below "CUSTOMIZE BELOW THIS LINE" will be migrated to PROJECT_AGENTS.md on next `--force` update
+- New commands available with `--extras`: adr (install with `/agentic update --extras` or `update-config.sh --extras`)
+- ts-bun projects now auto-detected via `bun.lockb` presence
+
 ## [1.1.0] - 2025-11-25
 
 ### Added

@@ -13,6 +13,37 @@ source "$SCRIPT_DIR/lib/detect-project-type.sh"
 source "$SCRIPT_DIR/lib/template-processor.sh"
 source "$SCRIPT_DIR/lib/version-manager.sh"
 
+# Dynamically discover available extras from core directory
+# Commands: all .md files in core/commands/claude/ EXCEPT core files (spec, agentic-*, o_spec)
+discover_available_commands() {
+  local cmds=()
+  for f in "$REPO_ROOT/core/commands/claude/"*.md; do
+    [[ ! -f "$f" ]] && continue
+    local name=$(basename "$f" .md)
+    # Skip core commands (always installed during setup, not extras)
+    case "$name" in
+      spec|agentic|agentic-*|o_spec) continue ;;
+    esac
+    cmds+=("$name")
+  done
+  echo "${cmds[@]}"
+}
+
+# Skills: all directories in core/skills/
+discover_available_skills() {
+  local skills=()
+  for d in "$REPO_ROOT/core/skills/"*/; do
+    [[ ! -d "$d" ]] && continue
+    local name=$(basename "$d")
+    skills+=("$name")
+  done
+  echo "${skills[@]}"
+}
+
+# Discover extras dynamically (no hardcoded lists!)
+AVAILABLE_CMDS=($(discover_available_commands))
+AVAILABLE_SKILLS=($(discover_available_skills))
+
 # Defaults
 FORCE=false
 DRY_RUN=false
@@ -179,6 +210,22 @@ if [[ "$DRY_RUN" != true ]]; then
   ln -sf AGENTS.md "$TARGET_PATH/GEMINI.md"
 fi
 
+# Create .gitignore if not exists
+if [[ ! -f "$TARGET_PATH/.gitignore" ]]; then
+  echo "🔵 Creating default .gitignore..."
+  if [[ "$DRY_RUN" != true ]]; then
+    cp "$REPO_ROOT/templates/shared/.gitignore.template" "$TARGET_PATH/.gitignore"
+  fi
+fi
+
+# Initialize git if not a repo
+if [[ ! -d "$TARGET_PATH/.git" ]]; then
+  echo "🔵 Initializing git repository..."
+  if [[ "$DRY_RUN" != true ]]; then
+    git -C "$TARGET_PATH" init --quiet
+  fi
+fi
+
 # Install AI tool configs
 if [[ "$TOOLS" == "all" || "$TOOLS" == *"claude"* ]]; then
   echo "🔵 Installing Claude configs..."
@@ -223,9 +270,10 @@ fi
 # Install extra project-agnostic commands and skills
 if [[ "$INSTALL_EXTRAS" == true ]]; then
   echo "🔵 Installing project-agnostic commands..."
+  echo "   Available: ${AVAILABLE_CMDS[*]}"
   if [[ "$DRY_RUN" != true ]]; then
     mkdir -p "$TARGET_PATH/.claude/commands"
-    for cmd in orc spawn squash squash_commit pull_request gh_pr_review; do
+    for cmd in "${AVAILABLE_CMDS[@]}"; do
       if [[ -f "$REPO_ROOT/core/commands/claude/$cmd.md" ]]; then
         ln -sf "$REPO_ROOT/core/commands/claude/$cmd.md" "$TARGET_PATH/.claude/commands/$cmd.md"
       fi
@@ -233,9 +281,10 @@ if [[ "$INSTALL_EXTRAS" == true ]]; then
   fi
 
   echo "🔵 Installing project-agnostic skills..."
+  echo "   Available: ${AVAILABLE_SKILLS[*]}"
   if [[ "$DRY_RUN" != true ]]; then
     mkdir -p "$TARGET_PATH/.claude/skills"
-    for skill in agent-orchestrator-manager single-file-uv-scripter command-writer skill-writer git-find-fork; do
+    for skill in "${AVAILABLE_SKILLS[@]}"; do
       if [[ -d "$REPO_ROOT/core/skills/$skill" ]]; then
         ln -sf "$REPO_ROOT/core/skills/$skill" "$TARGET_PATH/.claude/skills/$skill"
       fi

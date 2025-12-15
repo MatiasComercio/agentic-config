@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
+  "version": "1.1.1",
   "installed_at": "2025-12-15T13:20:42-03:00",
   "project_type": "python-uv",
   "auto_check": true,
@@ -17,5 +17,6 @@
     ".agent/config.yml",
     "AGENTS.md"
   ],
-  "extras_installed": true
+  "extras_installed": true,
+  "updated_at": "2025-12-15T19:27:40-03:00"
 }

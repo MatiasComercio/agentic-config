@@ -197,3 +197,53 @@ Based on intent, show relevant examples:
 **"Add deployment steps"** → Deployment section with environment details
 **"Project-specific linting rules"** → Note in AGENTS.md, not .agent/config.yml
 **"Database schema notes"** → Architecture section with DB details
+
+## Post-Customization Commit (Optional)
+
+After customizations are applied, offer to commit the changes.
+
+### 1. Identify Changed Files
+```bash
+git status --porcelain
+```
+
+### 2. Filter to Customization Files
+Only stage files modified during customization:
+- `AGENTS.md` (if template section was edited)
+- `PROJECT_AGENTS.md` (if project-specific guidelines added)
+- `.agent/config.yml` (if configuration changed)
+
+### 3. Offer Commit Option
+Use AskUserQuestion:
+- **Question**: "Commit project customizations?"
+- **Options**:
+  - "Yes, commit now" (Recommended) → Commits customization
+  - "No, I'll commit later" → Skip commit
+  - "Show changes first" → Run `git diff` then re-ask
+
+**Note**: In auto-approve/yolo mode, default to "Yes, commit now".
+
+### 4. Execute Commit
+If user confirms:
+```bash
+# Stage customization files
+git add AGENTS.md 2>/dev/null || true
+git add PROJECT_AGENTS.md 2>/dev/null || true
+git add .agent/config.yml 2>/dev/null || true
+
+# Commit with descriptive message
+git commit -m "docs(project): add project-specific guidelines
+
+- Document project architecture and conventions
+- Add team-specific workflow instructions
+- Configure project customizations
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>"
+```
+
+### 5. Report Result
+- Show commit hash if successful
+- Confirm customizations are version-controlled
+- Remind: "Customizations persist across agentic-config updates"
