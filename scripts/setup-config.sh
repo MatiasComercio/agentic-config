@@ -13,17 +13,12 @@ source "$SCRIPT_DIR/lib/detect-project-type.sh"
 source "$SCRIPT_DIR/lib/template-processor.sh"
 source "$SCRIPT_DIR/lib/version-manager.sh"
 
-# Dynamically discover available extras from core directory
-# Commands: all .md files in core/commands/claude/ EXCEPT core files (spec, agentic-*, o_spec)
+# Dynamically discover all available commands from core directory
 discover_available_commands() {
   local cmds=()
   for f in "$REPO_ROOT/core/commands/claude/"*.md; do
     [[ ! -f "$f" ]] && continue
     local name=$(basename "$f" .md)
-    # Skip core commands (always installed during setup, not extras)
-    case "$name" in
-      spec|agentic|agentic-*|o_spec) continue ;;
-    esac
     cmds+=("$name")
   done
   echo "${cmds[@]}"
@@ -40,7 +35,7 @@ discover_available_skills() {
   echo "${skills[@]}"
 }
 
-# Discover extras dynamically (no hardcoded lists!)
+# Discover commands and skills dynamically (no hardcoded lists!)
 AVAILABLE_CMDS=($(discover_available_commands))
 AVAILABLE_SKILLS=($(discover_available_skills))
 
@@ -50,7 +45,6 @@ DRY_RUN=false
 NO_REGISTRY=false
 TOOLS="all"
 PROJECT_TYPE=""
-INSTALL_EXTRAS=false
 
 # Usage
 usage() {
@@ -67,8 +61,6 @@ Options:
   --no-registry          Don't register installation in central registry
   --tools <claude,gemini,codex,all>
                          Which AI tool configs to install (default: all)
-  --extras               Install project-agnostic commands and skills
-                         (orc, spawn, squash, pull_request, gh_pr_review, etc.)
   -h, --help             Show this help message
 
 Examples:
@@ -106,10 +98,6 @@ while [[ $# -gt 0 ]]; do
     --tools)
       TOOLS="$2"
       shift 2
-      ;;
-    --extras)
-      INSTALL_EXTRAS=true
-      shift
       ;;
     -h|--help)
       usage
@@ -252,7 +240,7 @@ if [[ "$TOOLS" == "all" || "$TOOLS" == *"codex"* ]]; then
   fi
 fi
 
-# Install agentic management agents and commands
+# Install agentic management agents
 echo "🔵 Installing agentic management agents..."
 if [[ "$DRY_RUN" != true ]]; then
   # Create agent symlinks
@@ -260,36 +248,30 @@ if [[ "$DRY_RUN" != true ]]; then
   for agent in agentic-setup agentic-migrate agentic-update agentic-status agentic-validate agentic-customize; do
     ln -sf "$REPO_ROOT/core/agents/$agent.md" "$TARGET_PATH/.claude/agents/$agent.md"
   done
+fi
 
-  # Create agentic command symlinks
-  for cmd in agentic agentic-setup agentic-migrate agentic-update agentic-status; do
-    ln -sf "$REPO_ROOT/core/commands/claude/$cmd.md" "$TARGET_PATH/.claude/commands/$cmd.md"
+# Install all commands from core
+echo "🔵 Installing commands..."
+echo "   Available: ${AVAILABLE_CMDS[*]}"
+if [[ "$DRY_RUN" != true ]]; then
+  mkdir -p "$TARGET_PATH/.claude/commands"
+  for cmd in "${AVAILABLE_CMDS[@]}"; do
+    if [[ -f "$REPO_ROOT/core/commands/claude/$cmd.md" ]]; then
+      ln -sf "$REPO_ROOT/core/commands/claude/$cmd.md" "$TARGET_PATH/.claude/commands/$cmd.md"
+    fi
   done
 fi
 
-# Install extra project-agnostic commands and skills
-if [[ "$INSTALL_EXTRAS" == true ]]; then
-  echo "🔵 Installing project-agnostic commands..."
-  echo "   Available: ${AVAILABLE_CMDS[*]}"
-  if [[ "$DRY_RUN" != true ]]; then
-    mkdir -p "$TARGET_PATH/.claude/commands"
-    for cmd in "${AVAILABLE_CMDS[@]}"; do
-      if [[ -f "$REPO_ROOT/core/commands/claude/$cmd.md" ]]; then
-        ln -sf "$REPO_ROOT/core/commands/claude/$cmd.md" "$TARGET_PATH/.claude/commands/$cmd.md"
-      fi
-    done
-  fi
-
-  echo "🔵 Installing project-agnostic skills..."
-  echo "   Available: ${AVAILABLE_SKILLS[*]}"
-  if [[ "$DRY_RUN" != true ]]; then
-    mkdir -p "$TARGET_PATH/.claude/skills"
-    for skill in "${AVAILABLE_SKILLS[@]}"; do
-      if [[ -d "$REPO_ROOT/core/skills/$skill" ]]; then
-        ln -sf "$REPO_ROOT/core/skills/$skill" "$TARGET_PATH/.claude/skills/$skill"
-      fi
-    done
-  fi
+# Install all skills from core
+echo "🔵 Installing skills..."
+echo "   Available: ${AVAILABLE_SKILLS[*]}"
+if [[ "$DRY_RUN" != true ]]; then
+  mkdir -p "$TARGET_PATH/.claude/skills"
+  for skill in "${AVAILABLE_SKILLS[@]}"; do
+    if [[ -d "$REPO_ROOT/core/skills/$skill" ]]; then
+      ln -sf "$REPO_ROOT/core/skills/$skill" "$TARGET_PATH/.claude/skills/$skill"
+    fi
+  done
 fi
 
 # Register installation
@@ -303,12 +285,11 @@ echo ""
 echo "🟢 Setup complete!"
 echo "   Version: $VERSION"
 echo "   Type: $PROJECT_TYPE"
-[[ "$INSTALL_EXTRAS" == true ]] && echo "   Extras: commands + skills installed"
 [[ "$BACKED_UP" == true ]] && echo "   Backup: $BACKUP_DIR"
 [[ "$DRY_RUN" == true ]] && echo "   (DRY RUN - no changes made)"
 echo ""
 echo "Next steps:"
 echo "  1. Review and customize AGENTS.md for project-specific guidelines"
 echo "  2. Test with: cd $TARGET_PATH && /spec RESEARCH <spec_path>"
-[[ "$INSTALL_EXTRAS" == true ]] && echo "  3. Try /orc, /spawn, /pull_request commands"
+echo "  3. Try /orc, /spawn, /pull_request commands"
 echo "  See documentation: $REPO_ROOT/README.md"

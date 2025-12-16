@@ -2,6 +2,28 @@
 
 Centralized, versioned configuration for AI-assisted development workflows. Single source of truth for agentic tools (Claude Code, Antigravity, Codex CLI, Gemini CLI).
 
+## Quickstart (New Contributors)
+
+```bash
+# 1. Clone
+git clone git@github.com:YOUR_USERNAME/agentic-config.git
+cd agentic-config
+
+# 2. Start Claude Code
+claude
+
+# 3. Initialize symlinks (one-time setup)
+/init
+
+# 4. Setup agentic commands in any project
+cd ~/projects/my-project
+/agentic setup
+```
+
+That's it! You now have access to all `/agentic` commands and workflows.
+
+---
+
 ## Quick Start
 
 ### With Agent-Powered Interface (Recommended)
@@ -166,19 +188,12 @@ cd ~/projects/my-app
 ~/projects/agentic-config/scripts/update-config.sh --force .
 ```
 
-### Optional Extras (Project-Agnostic Commands & Skills)
+### What Gets Installed (Commands & Skills)
 
-Install additional commands and skills with `--extras` flag:
+All commands and skills are installed by default:
 
-```bash
-# During setup
-~/projects/agentic-config/scripts/setup-config.sh --extras ~/projects/my-app
-
-# Or during update
-~/projects/agentic-config/scripts/update-config.sh --extras ~/projects/my-app
-```
-
-**Available commands:**
+**Commands:**
+- `/init` - Initialize/repair symlinks after clone (bootstrap command)
 - `/adr` - Architecture Decision Records with auto-numbering
 - `/orc` - Orchestrate multi-agent tasks
 - `/spawn` - Spawn subagents with specific models
@@ -186,7 +201,7 @@ Install additional commands and skills with `--extras` flag:
 - `/pull_request` - Create GitHub PRs with comprehensive descriptions
 - `/gh_pr_review` - Review GitHub PRs with multi-agent orchestration
 
-**Available skills:**
+**Skills:**
 - `agent-orchestrator-manager` - Multi-agent delegation workflows
 - `single-file-uv-scripter` - Self-contained Python scripts with UV
 - `command-writer` - Create custom slash commands
@@ -197,6 +212,50 @@ Install additional commands and skills with `--extras` flag:
 - Auto-creates `.gitignore` with sensible defaults
 - Auto-runs `git init` if not already a repository
 - Cleans up orphaned symlinks on update
+
+### /init Command (Bootstrap)
+
+The `/init` command initializes symlinks in the **agentic-config repository itself** or installs globally to make `/agentic` commands available in all Claude Code sessions.
+
+**When to use:**
+- After cloning agentic-config for the first time
+- If symlinks are broken or missing
+- After pulling changes that add new commands/skills
+- To install agentic commands globally (user-level)
+
+**What it does:**
+```
+# In agentic-config repository (local symlinks):
+.claude/commands/*.md  → ../../core/commands/claude/*.md  (relative symlinks)
+.claude/skills/*       → ../../core/skills/*              (relative symlinks)
+.claude/agents/*.md    → ../../core/agents/*.md           (relative symlinks)
+
+# When run globally (user-level):
+~/.claude/commands/agentic*.md → symlinks to core/commands/claude/agentic*.md
+Appends agent discovery instructions to ~/.claude/CLAUDE.md
+```
+
+**Usage:**
+```bash
+# Local setup (within agentic-config repo)
+cd ~/projects/agentic-config
+/init
+
+# Global install (makes /agentic available everywhere)
+cd ~/projects/agentic-config
+/init global
+```
+
+**Output:**
+```
+# Agentic Config Symlinks Initialized
+- Commands: 20 files
+- Skills: 5 directories
+- Agents: 7 files
+- All symlinks are relative: ✓
+```
+
+**Note:** `/init` is a real file (not a symlink) so it's always available even when other symlinks are broken.
 
 ### Customization
 
@@ -414,13 +473,22 @@ See `core/agents/spec/*.md` for stage definitions.
 
 ### Broken Symlinks
 
+**In agentic-config repo itself:**
 ```bash
+cd ~/projects/agentic-config
+/init   # Regenerates all symlinks
+```
+
+**In other projects:**
+```bash
+cd ~/projects/my-app
+
 # Verify symlinks
-ls -la ~/projects/my-app/agents
-ls -la ~/projects/my-app/.claude/commands/
+ls -la agents
+ls -la .claude/commands/
 
 # Re-run setup with --force
-~/projects/agentic-config/scripts/setup-config.sh --force ~/projects/my-app
+~/projects/agentic-config/scripts/setup-config.sh --force .
 ```
 
 ### Version Mismatch
@@ -483,6 +551,6 @@ Private - Internal use only
 
 ## Version
 
-Current: 1.0.0
+Current: 0.1.2
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.

@@ -1,1 +1,1 @@
-/Users/matias/projects/agentic-config/core/commands/claude/pull_request.md
+../../core/commands/claude/pull_request.md

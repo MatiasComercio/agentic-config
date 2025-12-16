@@ -1,1 +1,1 @@
-/Users/matias/projects/agentic-config/core/agents/agentic-update.md
+../../core/agents/agentic-update.md

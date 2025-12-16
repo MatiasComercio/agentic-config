@@ -1,1 +1,1 @@
-/Users/matias/projects/agentic-config/core/commands/claude/agentic.md
+../../core/commands/claude/agentic.md

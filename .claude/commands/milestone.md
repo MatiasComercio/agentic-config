@@ -1,1 +1,1 @@
-/Users/matias/projects/agentic-config/core/commands/claude/milestone.md
+../../core/commands/claude/milestone.md

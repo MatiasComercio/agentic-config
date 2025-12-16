@@ -1,1 +1,1 @@
-/Users/matias/projects/agentic-config/core/commands/claude/orc.md
+../../core/commands/claude/orc.md

@@ -18,13 +18,6 @@ for cmd in agentic agentic-setup agentic-migrate agentic-update agentic-status; 
   fi
 done
 
-# Symlink Codex global prompts
-echo "🔵 Installing global Codex prompts..."
-CODEX_PROMPTS_DIR="$HOME/.codex/prompts"
-mkdir -p "$CODEX_PROMPTS_DIR"
-ln -sf "$AGENTIC_CONFIG_PATH/core/commands/codex/spec.md" "$CODEX_PROMPTS_DIR/spec.md"
-echo "  ✓ Linked Codex /spec"
-
 # Append to CLAUDE.md if not already present
 MARKER="## Agentic-Config Global"
 if ! grep -q "$MARKER" "$CLAUDE_MD" 2>/dev/null; then
@@ -46,6 +39,3 @@ fi
 echo ""
 echo "Installation complete. Global commands available:"
 echo "  /agentic, /agentic-setup, /agentic-migrate, /agentic-update, /agentic-status"
-echo ""
-echo "Codex CLI global commands:"
-echo "  /spec"

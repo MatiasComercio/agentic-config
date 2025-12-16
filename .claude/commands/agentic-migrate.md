@@ -1,1 +1,1 @@
-/Users/matias/projects/agentic-config/core/commands/claude/agentic-migrate.md
+../../core/commands/claude/agentic-migrate.md

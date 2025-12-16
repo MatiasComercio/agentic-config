@@ -1,1 +1,1 @@
-/Users/matias/projects/agentic-config/core/agents/agentic-validate.md
+../../core/agents/agentic-validate.md

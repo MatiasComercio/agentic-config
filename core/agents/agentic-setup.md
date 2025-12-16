@@ -26,7 +26,6 @@ Use AskUserQuestion to ask:
 - Target directory (default: current)
 - Project type if not auto-detectable (typescript, python-poetry, python-pip, rust, generic)
 - Which tools to install (claude, gemini, codex, antigravity, or all)
-- Install extras? (project-agnostic commands and skills like /orc, /spawn, /pull_request)
 - Dry-run first? (recommended for first-time users)
 
 ### 3. Explain Before Execution
@@ -48,14 +47,13 @@ Show what will happen:
 ~/projects/agentic-config/scripts/setup-config.sh \
   [--type <type>] \
   [--tools <tools>] \
-  [--extras] \
   [--force] \
   [--dry-run] \
   <target_path>
 ```
 
-**--extras flag**: Installs project-agnostic commands and skills:
-- Commands: `/orc`, `/spawn`, `/squash`, `/pull_request`, `/gh_pr_review`, `/adr`
+**All commands and skills are installed by default:**
+- Commands: `/orc`, `/spawn`, `/squash`, `/pull_request`, `/gh_pr_review`, `/adr`, `/init`
 - Skills: `agent-orchestrator-manager`, `single-file-uv-scripter`, `command-writer`, `skill-writer`, `git-find-fork`
 
 **Automatic setup actions** (v1.1.1+):

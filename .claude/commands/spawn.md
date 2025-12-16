@@ -1,1 +1,1 @@
-/Users/matias/projects/agentic-config/core/commands/claude/spawn.md
+../../core/commands/claude/spawn.md

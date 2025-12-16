@@ -10,20 +10,59 @@ LATEST_VERSION=$(cat "$REPO_ROOT/VERSION")
 # Source utilities
 source "$SCRIPT_DIR/lib/version-manager.sh"
 
-# Dynamically discover available extras from core directory
-# Commands: all .md files in core/commands/claude/ EXCEPT core files (spec, agentic-*, o_spec)
+# Dynamically discover all available commands from core directory
 discover_available_commands() {
   local cmds=()
   for f in "$REPO_ROOT/core/commands/claude/"*.md; do
     [[ ! -f "$f" ]] && continue
     local name=$(basename "$f" .md)
-    # Skip core commands (always installed during setup, not extras)
-    case "$name" in
-      spec|agentic|agentic-*|o_spec) continue ;;
-    esac
     cmds+=("$name")
   done
   echo "${cmds[@]}"
+}
+
+# Discover ALL commands (for self-hosted repo sync)
+discover_all_commands() {
+  local cmds=()
+  for f in "$REPO_ROOT/core/commands/claude/"*.md; do
+    [[ ! -f "$f" ]] && continue
+    cmds+=("$(basename "$f" .md)")
+  done
+  echo "${cmds[@]}"
+}
+
+# Check if target is the self-hosted agentic-config repo
+is_self_hosted() {
+  local target="$1"
+  [[ -f "$target/VERSION" && -d "$target/core/commands/claude" && -d "$target/core/agents" ]]
+}
+
+# Sync all command symlinks for self-hosted repo
+sync_self_hosted_commands() {
+  local target="$1"
+  local all_cmds=($(discover_all_commands))
+  local synced=0
+  local missing=()
+
+  echo "🔵 Self-hosted repo detected - syncing ALL command symlinks..."
+
+  for cmd in "${all_cmds[@]}"; do
+    local src="$REPO_ROOT/core/commands/claude/$cmd.md"
+    local dest="$target/.claude/commands/$cmd.md"
+
+    if [[ ! -L "$dest" ]]; then
+      missing+=("$cmd")
+      ln -sf "$src" "$dest"
+      echo "  ✓ $cmd.md (created)"
+      ((synced++)) || true
+    fi
+  done
+
+  if [[ $synced -eq 0 ]]; then
+    echo "  (all commands already symlinked)"
+  else
+    echo "🟢 Synced $synced missing command symlink(s)"
+  fi
 }
 
 # Skills: all directories in core/skills/
@@ -37,13 +76,12 @@ discover_available_skills() {
   echo "${skills[@]}"
 }
 
-# Discover extras dynamically (no hardcoded lists!)
+# Discover commands and skills dynamically (no hardcoded lists!)
 AVAILABLE_CMDS=($(discover_available_commands))
 AVAILABLE_SKILLS=($(discover_available_skills))
 
 # Defaults
 FORCE=false
-INSTALL_EXTRAS=false
 
 usage() {
   cat <<EOF
@@ -53,8 +91,6 @@ Update agentic configuration to latest version from central repository.
 
 Options:
   --force                Force update of copied files without prompting
-  --extras               Install project-agnostic commands and skills
-                         (orc, spawn, squash, pull_request, gh_pr_review, etc.)
   -h, --help             Show this help message
 
 Notes:
@@ -70,10 +106,6 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --force)
       FORCE=true
-      shift
-      ;;
-    --extras)
-      INSTALL_EXTRAS=true
       shift
       ;;
     -h|--help)
@@ -175,14 +207,14 @@ if [[ -L "$TARGET_PATH/.codex/prompts/spec.md" ]]; then
   fi
 fi
 
-if [[ "$CURRENT_VERSION" == "$LATEST_VERSION" && "$INSTALL_EXTRAS" == false ]]; then
-  echo "🟢 Already up to date!"
-  echo "   Tip: Use --extras to install project-agnostic commands and skills"
-  exit 0
+# CRITICAL: Self-hosted repo sync (always run to catch new commands)
+if is_self_hosted "$TARGET_PATH"; then
+  sync_self_hosted_commands "$TARGET_PATH"
 fi
 
-if [[ "$CURRENT_VERSION" == "$LATEST_VERSION" && "$INSTALL_EXTRAS" == true ]]; then
-  echo "🟢 Version up to date, installing extras..."
+if [[ "$CURRENT_VERSION" == "$LATEST_VERSION" ]]; then
+  echo "🟢 Already up to date!"
+  exit 0
 fi
 
 # Get project type from config
@@ -266,58 +298,51 @@ if [[ "$CURRENT_VERSION" != "$LATEST_VERSION" ]]; then
   fi
 fi
 
-# Install extras if requested
-if [[ "$INSTALL_EXTRAS" == true ]]; then
-  echo ""
-  echo "🔵 Installing project-agnostic commands..."
-  echo "   Available: ${AVAILABLE_CMDS[*]}"
-  mkdir -p "$TARGET_PATH/.claude/commands"
-  CMDS_INSTALLED=0
-  for cmd in "${AVAILABLE_CMDS[@]}"; do
-    if [[ -f "$REPO_ROOT/core/commands/claude/$cmd.md" ]]; then
-      if [[ ! -L "$TARGET_PATH/.claude/commands/$cmd.md" ]]; then
-        ln -sf "$REPO_ROOT/core/commands/claude/$cmd.md" "$TARGET_PATH/.claude/commands/$cmd.md"
-        echo "  ✓ $cmd.md"
-        ((CMDS_INSTALLED++)) || true
-      fi
+# Install all commands from core
+echo ""
+echo "🔵 Installing commands..."
+echo "   Available: ${AVAILABLE_CMDS[*]}"
+mkdir -p "$TARGET_PATH/.claude/commands"
+CMDS_INSTALLED=0
+for cmd in "${AVAILABLE_CMDS[@]}"; do
+  if [[ -f "$REPO_ROOT/core/commands/claude/$cmd.md" ]]; then
+    if [[ ! -L "$TARGET_PATH/.claude/commands/$cmd.md" ]]; then
+      ln -sf "$REPO_ROOT/core/commands/claude/$cmd.md" "$TARGET_PATH/.claude/commands/$cmd.md"
+      echo "  ✓ $cmd.md"
+      ((CMDS_INSTALLED++)) || true
     fi
-  done
-  [[ $CMDS_INSTALLED -eq 0 ]] && echo "  (all commands already installed)"
+  fi
+done
+[[ $CMDS_INSTALLED -eq 0 ]] && echo "  (all commands already installed)"
 
-  echo "🔵 Installing project-agnostic skills..."
-  echo "   Available: ${AVAILABLE_SKILLS[*]}"
-  mkdir -p "$TARGET_PATH/.claude/skills"
-  SKILLS_INSTALLED=0
-  for skill in "${AVAILABLE_SKILLS[@]}"; do
-    if [[ -d "$REPO_ROOT/core/skills/$skill" ]]; then
-      if [[ ! -L "$TARGET_PATH/.claude/skills/$skill" ]]; then
-        ln -sf "$REPO_ROOT/core/skills/$skill" "$TARGET_PATH/.claude/skills/$skill"
-        echo "  ✓ $skill"
-        ((SKILLS_INSTALLED++)) || true
-      fi
+# Install all skills from core
+echo "🔵 Installing skills..."
+echo "   Available: ${AVAILABLE_SKILLS[*]}"
+mkdir -p "$TARGET_PATH/.claude/skills"
+SKILLS_INSTALLED=0
+for skill in "${AVAILABLE_SKILLS[@]}"; do
+  if [[ -d "$REPO_ROOT/core/skills/$skill" ]]; then
+    if [[ ! -L "$TARGET_PATH/.claude/skills/$skill" ]]; then
+      ln -sf "$REPO_ROOT/core/skills/$skill" "$TARGET_PATH/.claude/skills/$skill"
+      echo "  ✓ $skill"
+      ((SKILLS_INSTALLED++)) || true
     fi
-  done
-  [[ $SKILLS_INSTALLED -eq 0 ]] && echo "  (all skills already installed)"
-
-  # Clean up orphaned symlinks
-  echo "🔵 Cleaning up orphaned symlinks..."
-  ORPHANS=$(cleanup_orphan_symlinks "$TARGET_PATH" ".claude/commands")
-  if [[ $ORPHANS -gt 0 ]]; then
-    echo "  Cleaned $ORPHANS orphan command symlink(s)"
-  else
-    echo "  (no orphans found)"
   fi
+done
+[[ $SKILLS_INSTALLED -eq 0 ]] && echo "  (all skills already installed)"
 
-  ORPHANS=$(cleanup_orphan_symlinks "$TARGET_PATH" ".claude/skills")
-  if [[ $ORPHANS -gt 0 ]]; then
-    echo "  Cleaned $ORPHANS orphan skill symlink(s)"
-  fi
+# Clean up orphaned symlinks
+echo "🔵 Cleaning up orphaned symlinks..."
+ORPHANS=$(cleanup_orphan_symlinks "$TARGET_PATH" ".claude/commands")
+if [[ $ORPHANS -gt 0 ]]; then
+  echo "  Cleaned $ORPHANS orphan command symlink(s)"
+else
+  echo "  (no orphans found)"
+fi
 
-  # Update config to track extras installation
-  jq '.extras_installed = true' \
-     "$TARGET_PATH/.agentic-config.json" > "$TARGET_PATH/.agentic-config.json.tmp"
-  mv "$TARGET_PATH/.agentic-config.json.tmp" "$TARGET_PATH/.agentic-config.json"
-  echo "🟢 Extras installed"
+ORPHANS=$(cleanup_orphan_symlinks "$TARGET_PATH" ".claude/skills")
+if [[ $ORPHANS -gt 0 ]]; then
+  echo "  Cleaned $ORPHANS orphan skill symlink(s)"
 fi
 
 echo ""

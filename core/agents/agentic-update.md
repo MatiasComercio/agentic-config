@@ -21,21 +21,44 @@ template changes and preserving customizations.
 - Compare with `~/projects/agentic-config/VERSION`
 - Read `CHANGELOG.md` for what changed between versions
 
-### 2. Extras Check
-- Check if `extras_installed` is true in `.agentic-config.json`
-- **Dynamically discover** available extras:
-  - Commands: All `.md` files in `~/projects/agentic-config/core/commands/claude/` EXCEPT core files (spec, agentic*, o_spec)
-  - Skills: All directories in `~/projects/agentic-config/core/skills/`
-- Compare with what's installed in `.claude/commands/` and `.claude/skills/`
-- Show user what extras are available but not installed
-- **CRITICAL**: Never use hardcoded lists - always scan the filesystem for current state
-
-### 3. Impact Assessment
+### 2. Impact Assessment
 - **Symlinked files:** automatic update (no action needed)
 - **AGENTS.md template:** check first ~20 lines for changes
 - **.agent/config.yml:** full diff if template changed
 - **New commands/skills:** show what's available but missing
 - Show user what needs attention
+
+### 3. Self-Hosted Repository Check (CRITICAL)
+
+**Detect self-hosted repo:**
+```bash
+# Check if current directory IS the agentic-config repository
+if [[ -f "VERSION" && -d "core/commands/claude" && -d "core/agents" ]]; then
+  IS_SELF_HOSTED=true
+fi
+```
+
+**For self-hosted repos, perform comprehensive symlink audit:**
+1. List ALL `.md` files in `core/commands/claude/`:
+   ```bash
+   ls core/commands/claude/*.md | xargs -n1 basename
+   ```
+2. List ALL symlinks in `.claude/commands/`:
+   ```bash
+   ls .claude/commands/*.md | xargs -n1 basename
+   ```
+3. **Compare and report missing symlinks:**
+   - Any command in `core/commands/claude/` MUST have a corresponding symlink
+   - Report: "🔴 Missing symlink: {command}.md"
+4. **Offer to fix:**
+   ```bash
+   ln -sf ~/projects/agentic-config/core/commands/claude/{cmd}.md .claude/commands/{cmd}.md
+   ```
+
+**Why this matters:**
+- Self-hosted repos are the SOURCE of truth
+- New commands added to `core/commands/claude/` won't work locally without symlinks
+- This prevents "command exists but doesn't work" bugs
 
 ## Update Workflow
 
@@ -57,13 +80,9 @@ Needs Review:
 
 📄 .agent/config.yml unchanged
 
-Available Extras (not installed):
-📦 Commands: [dynamically discovered from core/commands/claude/]
-📦 Skills: [dynamically discovered from core/skills/]
-
 New in v1.1.1:
 🔄 PROJECT_AGENTS.md migration (with --force)
-🧹 Orphan symlink cleanup (with --extras)
+🧹 Orphan symlink cleanup
 
 Your customizations will be preserved (migrated to PROJECT_AGENTS.md if using --force).
 ```
@@ -72,33 +91,21 @@ Your customizations will be preserved (migrated to PROJECT_AGENTS.md if using --
 Use AskUserQuestion to present:
 - **Show diff** → Display template changes
 - **Force update** → Apply template changes automatically (overwrites)
-- **Install extras** → Add project-agnostic commands and skills
 - **Manual merge** → Guide step-by-step merge
 - **Skip update** → Keep current version
 
 ### 3. Execute Update
 ```bash
-# For version/template updates
+# Update version and templates
 ~/projects/agentic-config/scripts/update-config.sh \
   [--force] \
-  <target_path>
-
-# For installing extras (commands + skills)
-~/projects/agentic-config/scripts/update-config.sh \
-  --extras \
-  <target_path>
-
-# Combined: force update + install extras
-~/projects/agentic-config/scripts/update-config.sh \
-  --force --extras \
   <target_path>
 ```
 
 ### 4. Validation
 - Check version updated in `.agentic-config.json`
-- Check `extras_installed` flag if extras were installed
 - Verify symlinks still valid: `ls -la agents`
-- Verify extras symlinks if installed: `ls -la .claude/commands/` and `ls -la .claude/skills/`
+- Verify command/skill symlinks: `ls -la .claude/commands/` and `ls -la .claude/skills/`
 - Test /spec command: `/spec RESEARCH <test_spec>`
 - Confirm no broken references
 
@@ -130,7 +137,6 @@ Reassure user:
 - Backups created before any file modifications
 - Can always rollback to previous version
 - Validation runs automatically post-update
-- Extras installation is additive (never removes existing commands/skills)
 - Orphan symlinks cleaned up automatically (v1.1.1+)
 
 ## Post-Workflow Commit (Optional)
@@ -147,8 +153,6 @@ Only stage files created/modified by update:
 - `.agentic-config.json` (version bump, updated_at)
 - `AGENTS.md` (if template updated)
 - `PROJECT_AGENTS.md` (if customizations migrated)
-- `.claude/commands/` (new commands if extras installed)
-- `.claude/skills/` (new skills if extras installed)
 
 ### 3. Offer Commit Option
 Use AskUserQuestion:
@@ -167,8 +171,6 @@ If user confirms:
 git add .agentic-config.json
 git add AGENTS.md 2>/dev/null || true
 git add PROJECT_AGENTS.md 2>/dev/null || true
-git add .claude/commands/ 2>/dev/null || true
-git add .claude/skills/ 2>/dev/null || true
 
 # Get version for commit message
 VERSION=$(jq -r .version .agentic-config.json)
@@ -178,7 +180,6 @@ git commit -m "chore(agentic): update to agentic-config v${VERSION}
 
 - Sync to latest version from central repository
 - Apply template updates
-- Install new extras (if any)
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 

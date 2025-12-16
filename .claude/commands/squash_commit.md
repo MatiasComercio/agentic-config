@@ -1,1 +1,1 @@
-/Users/matias/projects/agentic-config/core/commands/claude/squash_commit.md
+../../core/commands/claude/squash_commit.md

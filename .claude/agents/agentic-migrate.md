@@ -1,1 +1,1 @@
-/Users/matias/projects/agentic-config/core/agents/agentic-migrate.md
+../../core/agents/agentic-migrate.md
