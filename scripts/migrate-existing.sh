@@ -52,7 +52,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     -*)
-      echo "🔴 ERROR: Unknown option: $1" >&2
+      echo "ERROR: Unknown option: $1" >&2
       usage
       exit 1
       ;;
@@ -65,25 +65,25 @@ done
 
 # Validate
 if [[ -z "$TARGET_PATH" ]]; then
-  echo "🔴 ERROR: target_path required" >&2
+  echo "ERROR: target_path required" >&2
   usage
   exit 1
 fi
 
 if [[ ! -d "$TARGET_PATH" ]]; then
-  echo "🔴 ERROR: Directory does not exist: $TARGET_PATH" >&2
+  echo "ERROR: Directory does not exist: $TARGET_PATH" >&2
   exit 1
 fi
 
 TARGET_PATH="$(cd "$TARGET_PATH" && pwd)"
 
-echo "🔵 Agentic Configuration Migration v$VERSION"
+echo "Agentic Configuration Migration v$VERSION"
 echo "   Target: $TARGET_PATH"
 
 # Check if already centralized
 if [[ -L "$TARGET_PATH/agents" && -f "$TARGET_PATH/.agentic-config.json" ]]; then
   EXISTING_VERSION=$(check_version "$TARGET_PATH")
-  echo "🟢 Already centralized (version: $EXISTING_VERSION)"
+  echo "Already centralized (version: $EXISTING_VERSION)"
   echo "   Use update-config.sh to sync latest changes"
   exit 0
 fi
@@ -98,7 +98,7 @@ HAS_AGENTS_MD=false
 [[ -f "$TARGET_PATH/AGENTS.md" ]] && HAS_AGENTS_MD=true
 
 if [[ "$HAS_AGENTS" == false && "$HAS_AGENT_DIR" == false ]]; then
-  echo "🟡 No agentic configuration detected"
+  echo "WARNING: No agentic configuration detected"
   echo "   Use setup-config.sh for new installation"
   exit 0
 fi
@@ -126,7 +126,7 @@ fi
 
 # Create backup
 BACKUP_DIR="$TARGET_PATH/.agentic-config.backup.$(date +%s)"
-echo "🔵 Creating backup: $BACKUP_DIR"
+echo "Creating backup: $BACKUP_DIR"
 if [[ "$DRY_RUN" != true ]]; then
   mkdir -p "$BACKUP_DIR"
   [[ -d "$TARGET_PATH/agents" ]] && cp -r "$TARGET_PATH/agents" "$BACKUP_DIR/"
@@ -136,12 +136,12 @@ fi
 
 # Remove old agents/ directory (will be replaced with symlink)
 if [[ -d "$TARGET_PATH/agents" && ! -L "$TARGET_PATH/agents" ]]; then
-  echo "🔵 Removing old agents/ directory..."
+  echo "Removing old agents/ directory..."
   [[ "$DRY_RUN" != true ]] && rm -rf "$TARGET_PATH/agents"
 fi
 
 # Call setup-config with force
-echo "🔵 Installing centralized configuration..."
+echo "Installing centralized configuration..."
 if [[ "$DRY_RUN" == true ]]; then
   "$SCRIPT_DIR/setup-config.sh" --dry-run --force --type "$PROJECT_TYPE" "$TARGET_PATH"
 else
@@ -149,7 +149,7 @@ else
 fi
 
 echo ""
-echo "🟢 Migration complete!"
+echo "Migration complete!"
 echo "   Backup: $BACKUP_DIR"
 echo "   Version: $VERSION"
 echo ""

@@ -26,16 +26,26 @@ Create a new git branch and its corresponding spec directory.
    git checkout -b $ARGUMENTS
    ```
 
-2. **Create spec directory** (following project convention):
+2. **Create spec directory relative to CWD** (NOT repo root):
+   ```bash
+   # CRITICAL: Use current directory, not repo root
+   SPEC_DIR="./specs/$(date +%Y)/$(date +%m)/$ARGUMENTS"
+   mkdir -p "$SPEC_DIR"
+   touch "$SPEC_DIR/000-backlog.md"
    ```
-   specs/<YYYY>/<MM>/<branch-name>/
-   ```
-   - Use current year and month
-   - Create `000-backlog.md` (empty file)
+   - Path: `specs/<YYYY>/<MM>/<branch-name>/`
+   - Creates `000-backlog.md` (empty file)
 
-3. **Confirm**:
+3. **Commit spec directory**:
+   ```bash
+   git add "$SPEC_DIR"
+   git commit -m "chore(spec): create spec directory for $ARGUMENTS"
+   ```
+   - **CRITICAL**: Must commit BEFORE creating worktree, otherwise spec files are lost
+
+4. **Confirm**:
    ```
    - Branch: $ARGUMENTS
    - Spec dir: specs/<YYYY>/<MM>/<branch-name>/
-   - Backlog: 000-backlog.md (empty)
+   - Backlog: 000-backlog.md (committed)
    ```

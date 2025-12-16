@@ -34,6 +34,10 @@ EOF
 
   # Update central registry
   if command -v jq &>/dev/null; then
+    # Create registry file if it doesn't exist
+    if [[ ! -f "$registry_file" ]]; then
+      echo '{"installations": []}' > "$registry_file"
+    fi
     local temp_file=$(mktemp)
     jq --arg path "$target_path" \
        --arg type "$project_type" \
@@ -43,7 +47,7 @@ EOF
        "$registry_file" > "$temp_file"
     mv "$temp_file" "$registry_file"
   else
-    echo "🟡 WARNING: jq not installed, skipping central registry update" >&2
+    echo "WARNING: jq not installed, skipping central registry update" >&2
   fi
 
   return 0

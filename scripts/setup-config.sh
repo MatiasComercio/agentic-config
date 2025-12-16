@@ -104,7 +104,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     -*)
-      echo "🔴 ERROR: Unknown option: $1" >&2
+      echo "ERROR: Unknown option: $1" >&2
       usage
       exit 1
       ;;
@@ -117,19 +117,19 @@ done
 
 # Validate target path
 if [[ -z "$TARGET_PATH" ]]; then
-  echo "🔴 ERROR: target_path required" >&2
+  echo "ERROR: target_path required" >&2
   usage
   exit 1
 fi
 
 # Resolve absolute path
 if [[ ! -d "$TARGET_PATH" ]]; then
-  echo "🔴 ERROR: Directory does not exist: $TARGET_PATH" >&2
+  echo "ERROR: Directory does not exist: $TARGET_PATH" >&2
   exit 1
 fi
 TARGET_PATH="$(cd "$TARGET_PATH" && pwd)"
 
-echo "🔵 Agentic Configuration Setup v$VERSION"
+echo "Agentic Configuration Setup v$VERSION"
 echo "   Target: $TARGET_PATH"
 
 # Auto-detect project type if not specified
@@ -143,7 +143,7 @@ fi
 # Validate template exists
 TEMPLATE_DIR="$REPO_ROOT/templates/$PROJECT_TYPE"
 if [[ ! -d "$TEMPLATE_DIR" ]]; then
-  echo "🔴 ERROR: No template for project type: $PROJECT_TYPE" >&2
+  echo "ERROR: No template for project type: $PROJECT_TYPE" >&2
   echo "   Available: typescript, python-poetry, python-pip, python-uv, rust, generic" >&2
   exit 1
 fi
@@ -152,18 +152,82 @@ fi
 if [[ -L "$TARGET_PATH/agents" || -f "$TARGET_PATH/.agentic-config.json" ]]; then
   EXISTING_VERSION=$(check_version "$TARGET_PATH")
   if [[ "$FORCE" != true ]]; then
-    echo "🟡 Existing installation detected (version: $EXISTING_VERSION)"
+    echo "WARNING: Existing installation detected (version: $EXISTING_VERSION)"
     echo "   Use --force to overwrite or run update-config.sh to update"
     exit 0
   fi
   echo "   Overwriting existing installation (version: $EXISTING_VERSION)"
 fi
 
+# Preserve custom content from existing config files into PROJECT_AGENTS.md
+preserve_custom_content() {
+  local target="$1"
+  local preserved_content=""
+  local source_file=""
+
+  # Check AGENTS.md (if real file, not symlink)
+  if [[ -f "$target/AGENTS.md" && ! -L "$target/AGENTS.md" ]]; then
+    source_file="$target/AGENTS.md"
+  # Check CLAUDE.md (if real file, not symlink)
+  elif [[ -f "$target/CLAUDE.md" && ! -L "$target/CLAUDE.md" ]]; then
+    source_file="$target/CLAUDE.md"
+  # Check GEMINI.md (if real file, not symlink)
+  elif [[ -f "$target/GEMINI.md" && ! -L "$target/GEMINI.md" ]]; then
+    source_file="$target/GEMINI.md"
+  fi
+
+  if [[ -n "$source_file" ]]; then
+    preserved_content=$(cat "$source_file")
+
+    # Skip if empty or just whitespace
+    if [[ -z "${preserved_content// /}" ]]; then
+      return 0
+    fi
+
+    # Check if PROJECT_AGENTS.md already exists
+    if [[ -f "$target/PROJECT_AGENTS.md" ]]; then
+      echo "   PROJECT_AGENTS.md already exists, appending preserved content"
+      if [[ "$DRY_RUN" != true ]]; then
+        {
+          echo ""
+          echo "<!-- Preserved from pre-existing $(basename "$source_file") -->"
+          echo ""
+          echo "$preserved_content"
+        } >> "$target/PROJECT_AGENTS.md"
+      fi
+    else
+      echo "   Creating PROJECT_AGENTS.md with preserved content from $(basename "$source_file")"
+      if [[ "$DRY_RUN" != true ]]; then
+        {
+          echo "# Project-Specific Guidelines"
+          echo ""
+          echo "<!-- Preserved from pre-existing $(basename "$source_file") -->"
+          echo ""
+          echo "$preserved_content"
+        } > "$target/PROJECT_AGENTS.md"
+      fi
+    fi
+    return 0
+  fi
+  return 1
+}
+
+# Preserve custom content BEFORE backup/overwrite
+CONTENT_PRESERVED=false
+if [[ -f "$TARGET_PATH/AGENTS.md" && ! -L "$TARGET_PATH/AGENTS.md" ]] || \
+   [[ -f "$TARGET_PATH/CLAUDE.md" && ! -L "$TARGET_PATH/CLAUDE.md" ]] || \
+   [[ -f "$TARGET_PATH/GEMINI.md" && ! -L "$TARGET_PATH/GEMINI.md" ]]; then
+  echo "Preserving custom content..."
+  if preserve_custom_content "$TARGET_PATH"; then
+    CONTENT_PRESERVED=true
+  fi
+fi
+
 # Backup existing files if they exist
 BACKED_UP=false
 if [[ -e "$TARGET_PATH/agents" || -e "$TARGET_PATH/.agent" || -e "$TARGET_PATH/AGENTS.md" ]]; then
   BACKUP_DIR="$TARGET_PATH/.agentic-config.backup.$(date +%s)"
-  echo "🔵 Creating backup: $BACKUP_DIR"
+  echo "Creating backup: $BACKUP_DIR"
 
   if [[ "$DRY_RUN" != true ]]; then
     mkdir -p "$BACKUP_DIR"
@@ -177,7 +241,7 @@ if [[ -e "$TARGET_PATH/agents" || -e "$TARGET_PATH/.agent" || -e "$TARGET_PATH/A
 fi
 
 # Create core symlinks
-echo "🔵 Creating core symlinks..."
+echo "Creating core symlinks..."
 if [[ "$DRY_RUN" != true ]]; then
   ln -sf "$REPO_ROOT/core/agents" "$TARGET_PATH/agents"
   mkdir -p "$TARGET_PATH/.agent/workflows"
@@ -185,14 +249,14 @@ if [[ "$DRY_RUN" != true ]]; then
 fi
 
 # Install templates
-echo "🔵 Installing config templates ($PROJECT_TYPE)..."
+echo "Installing config templates ($PROJECT_TYPE)..."
 if [[ "$DRY_RUN" != true ]]; then
   process_template "$TEMPLATE_DIR/.agent/config.yml.template" "$TARGET_PATH/.agent/config.yml"
   process_template "$TEMPLATE_DIR/AGENTS.md.template" "$TARGET_PATH/AGENTS.md"
 fi
 
 # Create local symlinks
-echo "🔵 Creating local symlinks..."
+echo "Creating local symlinks..."
 if [[ "$DRY_RUN" != true ]]; then
   ln -sf AGENTS.md "$TARGET_PATH/CLAUDE.md"
   ln -sf AGENTS.md "$TARGET_PATH/GEMINI.md"
@@ -200,15 +264,15 @@ fi
 
 # Create .gitignore if not exists
 if [[ ! -f "$TARGET_PATH/.gitignore" ]]; then
-  echo "🔵 Creating default .gitignore..."
+  echo "Creating default .gitignore..."
   if [[ "$DRY_RUN" != true ]]; then
     cp "$REPO_ROOT/templates/shared/.gitignore.template" "$TARGET_PATH/.gitignore"
   fi
 fi
 
-# Initialize git if not a repo
-if [[ ! -d "$TARGET_PATH/.git" ]]; then
-  echo "🔵 Initializing git repository..."
+# Initialize git if not inside any git repo (including parent repos)
+if ! git -C "$TARGET_PATH" rev-parse --is-inside-work-tree &>/dev/null; then
+  echo "Initializing git repository..."
   if [[ "$DRY_RUN" != true ]]; then
     git -C "$TARGET_PATH" init --quiet
   fi
@@ -216,7 +280,7 @@ fi
 
 # Install AI tool configs
 if [[ "$TOOLS" == "all" || "$TOOLS" == *"claude"* ]]; then
-  echo "🔵 Installing Claude configs..."
+  echo "Installing Claude configs..."
   if [[ "$DRY_RUN" != true ]]; then
     mkdir -p "$TARGET_PATH/.claude/commands"
     ln -sf "$REPO_ROOT/core/commands/claude/spec.md" "$TARGET_PATH/.claude/commands/spec.md"
@@ -224,7 +288,7 @@ if [[ "$TOOLS" == "all" || "$TOOLS" == *"claude"* ]]; then
 fi
 
 if [[ "$TOOLS" == "all" || "$TOOLS" == *"gemini"* ]]; then
-  echo "🔵 Installing Gemini configs..."
+  echo "Installing Gemini configs..."
   if [[ "$DRY_RUN" != true ]]; then
     mkdir -p "$TARGET_PATH/.gemini/commands"
     ln -sf "$REPO_ROOT/core/commands/gemini/spec.toml" "$TARGET_PATH/.gemini/commands/spec.toml"
@@ -233,7 +297,7 @@ if [[ "$TOOLS" == "all" || "$TOOLS" == *"gemini"* ]]; then
 fi
 
 if [[ "$TOOLS" == "all" || "$TOOLS" == *"codex"* ]]; then
-  echo "🔵 Installing Codex configs..."
+  echo "Installing Codex configs..."
   if [[ "$DRY_RUN" != true ]]; then
     mkdir -p "$TARGET_PATH/.codex/prompts"
     ln -sf "$REPO_ROOT/core/commands/codex/spec.md" "$TARGET_PATH/.codex/prompts/spec.md"
@@ -241,7 +305,7 @@ if [[ "$TOOLS" == "all" || "$TOOLS" == *"codex"* ]]; then
 fi
 
 # Install agentic management agents
-echo "🔵 Installing agentic management agents..."
+echo "Installing agentic management agents..."
 if [[ "$DRY_RUN" != true ]]; then
   # Create agent symlinks
   mkdir -p "$TARGET_PATH/.claude/agents"
@@ -251,7 +315,7 @@ if [[ "$DRY_RUN" != true ]]; then
 fi
 
 # Install all commands from core
-echo "🔵 Installing commands..."
+echo "Installing commands..."
 echo "   Available: ${AVAILABLE_CMDS[*]}"
 if [[ "$DRY_RUN" != true ]]; then
   mkdir -p "$TARGET_PATH/.claude/commands"
@@ -263,12 +327,24 @@ if [[ "$DRY_RUN" != true ]]; then
 fi
 
 # Install all skills from core
-echo "🔵 Installing skills..."
+echo "Installing skills..."
 echo "   Available: ${AVAILABLE_SKILLS[*]}"
 if [[ "$DRY_RUN" != true ]]; then
   mkdir -p "$TARGET_PATH/.claude/skills"
   for skill in "${AVAILABLE_SKILLS[@]}"; do
     if [[ -d "$REPO_ROOT/core/skills/$skill" ]]; then
+      # Backup existing dir (not symlink) before replacing to preserve local customizations
+      if [[ -d "$TARGET_PATH/.claude/skills/$skill" && ! -L "$TARGET_PATH/.claude/skills/$skill" ]]; then
+        if [[ -z "${BACKUP_DIR:-}" ]]; then
+          BACKUP_DIR="$TARGET_PATH/.agentic-config.backup.$(date +%s)"
+          mkdir -p "$BACKUP_DIR"
+          BACKED_UP=true
+        fi
+        mkdir -p "$BACKUP_DIR/skills"
+        mv "$TARGET_PATH/.claude/skills/$skill" "$BACKUP_DIR/skills/$skill"
+        echo "   Backed up: $skill"
+      fi
+      rm -rf "$TARGET_PATH/.claude/skills/$skill" 2>/dev/null
       ln -sf "$REPO_ROOT/core/skills/$skill" "$TARGET_PATH/.claude/skills/$skill"
     fi
   done
@@ -276,20 +352,21 @@ fi
 
 # Register installation
 if [[ "$NO_REGISTRY" != true && "$DRY_RUN" != true ]]; then
-  echo "🔵 Registering installation..."
+  echo "Registering installation..."
   register_installation "$TARGET_PATH" "$PROJECT_TYPE" "$VERSION"
 fi
 
 # Summary
 echo ""
-echo "🟢 Setup complete!"
+echo "Setup complete!"
 echo "   Version: $VERSION"
 echo "   Type: $PROJECT_TYPE"
+[[ "$CONTENT_PRESERVED" == true ]] && echo "   Preserved: Custom content moved to PROJECT_AGENTS.md"
 [[ "$BACKED_UP" == true ]] && echo "   Backup: $BACKUP_DIR"
 [[ "$DRY_RUN" == true ]] && echo "   (DRY RUN - no changes made)"
 echo ""
 echo "Next steps:"
-echo "  1. Review and customize AGENTS.md for project-specific guidelines"
+echo "  1. Review PROJECT_AGENTS.md for project-specific guidelines"
 echo "  2. Test with: cd $TARGET_PATH && /spec RESEARCH <spec_path>"
 echo "  3. Try /orc, /spawn, /pull_request commands"
 echo "  See documentation: $REPO_ROOT/README.md"

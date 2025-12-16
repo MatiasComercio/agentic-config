@@ -210,7 +210,7 @@ All commands and skills are installed by default:
 
 **New in v1.1.1:**
 - Auto-creates `.gitignore` with sensible defaults
-- Auto-runs `git init` if not already a repository
+- Auto-runs `git init` if not inside any git repository (including parent repos)
 - Cleans up orphaned symlinks on update
 
 ### /init Command (Bootstrap)

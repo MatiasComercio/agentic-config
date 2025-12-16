@@ -2,6 +2,31 @@
 
 All notable changes to agentic-config.
 
+## [Unreleased]
+
+## [0.1.3] - 2025-12-16
+
+### Added
+- `/worktree` command for creating git worktrees with asset symlinks and environment setup
+- `/rebase` command for rebasing current branch onto target
+- `/squash_and_rebase` command for squash + rebase in one operation
+- `git-rewrite-history` skill for safe git history manipulation
+- CHANGELOG.md handling in `/milestone` release workflow
+
+### Fixed
+- `git init` now checks if inside ANY git repo (including parent repos) before initializing
+- Create `.installations.json` if missing before jq update (was causing setup to fail)
+- `/worktree` now resolves `assets.source` relative to `.worktree.yml` location (not CWD)
+- `/branch` creates spec dir relative to CWD (not repo root) and commits it
+- `/worktree` spec dir no longer lost after worktree creation (requires committed state)
+- `/worktree` commits setup changes at end to avoid unstaged files
+- Backup existing skill directories before symlink replacement
+
+### Changed
+- Setup preserves pre-existing config content to `PROJECT_AGENTS.md`
+- `/worktree` uses haiku agents for parallel environment setup
+- Removed emojis from scripts and agent definitions for consistency
+
 ## [0.1.2] - 2025-12-16
 
 ### Added

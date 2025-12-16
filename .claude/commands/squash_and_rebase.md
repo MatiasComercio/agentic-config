@@ -1,0 +1,1 @@
+../../core/commands/claude/squash_and_rebase.md

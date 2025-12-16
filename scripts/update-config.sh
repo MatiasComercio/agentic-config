@@ -44,7 +44,7 @@ sync_self_hosted_commands() {
   local synced=0
   local missing=()
 
-  echo "🔵 Self-hosted repo detected - syncing ALL command symlinks..."
+  echo "Self-hosted repo detected - syncing ALL command symlinks..."
 
   for cmd in "${all_cmds[@]}"; do
     local src="$REPO_ROOT/core/commands/claude/$cmd.md"
@@ -61,7 +61,7 @@ sync_self_hosted_commands() {
   if [[ $synced -eq 0 ]]; then
     echo "  (all commands already symlinked)"
   else
-    echo "🟢 Synced $synced missing command symlink(s)"
+    echo "Synced $synced missing command symlink(s)"
   fi
 }
 
@@ -113,7 +113,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     -*)
-      echo "🔴 ERROR: Unknown option: $1" >&2
+      echo "ERROR: Unknown option: $1" >&2
       usage
       exit 1
       ;;
@@ -134,7 +134,7 @@ cleanup_orphan_symlinks() {
     for link in "$target/$dir"/*; do
       if [[ -L "$link" && ! -e "$link" ]]; then
         rm "$link"
-        echo "  🟡 Removed orphan: $(basename "$link")"
+        echo "  Removed orphan: $(basename "$link")"
         ((removed++)) || true
       fi
     done
@@ -170,16 +170,16 @@ migrate_to_project_agents() {
   [[ -z "$custom_content" ]] && return 0
 
   # Has real customizations - migrate
-  echo "🔵 Migrating customizations to PROJECT_AGENTS.md..."
+  echo "Migrating customizations to PROJECT_AGENTS.md..."
   tail -n +$content_start "$agents_file" > "$project_file"
-  echo "🟢 Migration complete: customizations preserved in PROJECT_AGENTS.md"
+  echo "Migration complete: customizations preserved in PROJECT_AGENTS.md"
 
   return 0
 }
 
 # Validate
 if [[ ! -d "$TARGET_PATH" ]]; then
-  echo "🔴 ERROR: Directory does not exist: $TARGET_PATH" >&2
+  echo "ERROR: Directory does not exist: $TARGET_PATH" >&2
   exit 1
 fi
 
@@ -187,13 +187,13 @@ TARGET_PATH="$(cd "$TARGET_PATH" && pwd)"
 
 # Check if centralized config exists
 if [[ ! -f "$TARGET_PATH/.agentic-config.json" ]]; then
-  echo "🔴 ERROR: No centralized configuration found" >&2
+  echo "ERROR: No centralized configuration found" >&2
   echo "   Run setup-config.sh or migrate-existing.sh first" >&2
   exit 1
 fi
 
 CURRENT_VERSION=$(check_version "$TARGET_PATH")
-echo "🔵 Agentic Configuration Update"
+echo "Agentic Configuration Update"
 echo "   Current version: $CURRENT_VERSION"
 echo "   Latest version:  $LATEST_VERSION"
 
@@ -201,7 +201,7 @@ echo "   Latest version:  $LATEST_VERSION"
 if [[ -L "$TARGET_PATH/.codex/prompts/spec.md" ]]; then
   CURRENT_TARGET=$(readlink "$TARGET_PATH/.codex/prompts/spec.md")
   if [[ "$CURRENT_TARGET" == *"spec-command.md" ]]; then
-    echo "🔵 Fixing Codex spec symlink..."
+    echo "Fixing Codex spec symlink..."
     ln -sf "$REPO_ROOT/core/commands/codex/spec.md" "$TARGET_PATH/.codex/prompts/spec.md"
     echo "  ✓ Updated Codex symlink to use proper command file"
   fi
@@ -213,7 +213,7 @@ if is_self_hosted "$TARGET_PATH"; then
 fi
 
 if [[ "$CURRENT_VERSION" == "$LATEST_VERSION" ]]; then
-  echo "🟢 Already up to date!"
+  echo "Already up to date!"
   exit 0
 fi
 
@@ -226,12 +226,12 @@ if [[ "$CURRENT_VERSION" != "$LATEST_VERSION" ]]; then
   # Check if updates are opt-in
   AUTO_CHECK=$(jq -r '.auto_check // true' "$TARGET_PATH/.agentic-config.json" 2>/dev/null || echo "true")
   if [[ "$AUTO_CHECK" == "false" ]]; then
-    echo "🟡 Auto-check disabled for this project"
+    echo "WARNING: Auto-check disabled for this project"
     echo "   To enable: jq '.auto_check = true' .agentic-config.json > tmp && mv tmp .agentic-config.json"
   fi
 
   echo ""
-  echo "🔵 Update available: $CURRENT_VERSION → $LATEST_VERSION"
+  echo "Update available: $CURRENT_VERSION → $LATEST_VERSION"
   echo ""
   echo "Symlinked files will update automatically:"
   echo "  - agents/ (workflows)"
@@ -259,21 +259,21 @@ if [[ "$CURRENT_VERSION" != "$LATEST_VERSION" ]]; then
   fi
 
   if [[ "$HAS_CONFIG_CHANGES" == false && "$HAS_AGENTS_CHANGES" == false ]]; then
-    echo "🟢 No template changes detected"
+    echo "No template changes detected"
   else
     echo ""
-    [[ "$HAS_CONFIG_CHANGES" == true ]] && echo "📄 .agent/config.yml has updates"
-    [[ "$HAS_AGENTS_CHANGES" == true ]] && echo "📄 AGENTS.md template has updates"
+    [[ "$HAS_CONFIG_CHANGES" == true ]] && echo "  .agent/config.yml has updates"
+    [[ "$HAS_AGENTS_CHANGES" == true ]] && echo "  AGENTS.md template has updates"
     echo ""
 
     if [[ "$FORCE" == true ]]; then
       # Migrate customizations to PROJECT_AGENTS.md if needed
       migrate_to_project_agents "$TARGET_PATH"
 
-      echo "🔵 Force updating templates..."
+      echo "Force updating templates..."
       [[ "$HAS_CONFIG_CHANGES" == true ]] && cp "$TEMPLATE_DIR/.agent/config.yml.template" "$TARGET_PATH/.agent/config.yml"
       [[ "$HAS_AGENTS_CHANGES" == true ]] && cp "$TEMPLATE_DIR/AGENTS.md.template" "$TARGET_PATH/AGENTS.md"
-      echo "🟢 Templates updated"
+      echo "Templates updated"
     else
       echo "To view changes:"
       [[ "$HAS_CONFIG_CHANGES" == true ]] && echo "  diff $TARGET_PATH/.agent/config.yml $TEMPLATE_DIR/.agent/config.yml.template"
@@ -288,19 +288,19 @@ if [[ "$CURRENT_VERSION" != "$LATEST_VERSION" ]]; then
 
   # Update version tracking
   if [[ "$FORCE" == true || "$HAS_CONFIG_CHANGES" == false ]]; then
-    echo "🔵 Updating version tracking..."
+    echo "Updating version tracking..."
     jq --arg version "$LATEST_VERSION" \
        --arg timestamp "$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)" \
        '.version = $version | .updated_at = $timestamp' \
        "$TARGET_PATH/.agentic-config.json" > "$TARGET_PATH/.agentic-config.json.tmp"
     mv "$TARGET_PATH/.agentic-config.json.tmp" "$TARGET_PATH/.agentic-config.json"
-    echo "🟢 Version updated to $LATEST_VERSION"
+    echo "Version updated to $LATEST_VERSION"
   fi
 fi
 
 # Install all commands from core
 echo ""
-echo "🔵 Installing commands..."
+echo "Installing commands..."
 echo "   Available: ${AVAILABLE_CMDS[*]}"
 mkdir -p "$TARGET_PATH/.claude/commands"
 CMDS_INSTALLED=0
@@ -316,13 +316,23 @@ done
 [[ $CMDS_INSTALLED -eq 0 ]] && echo "  (all commands already installed)"
 
 # Install all skills from core
-echo "🔵 Installing skills..."
+echo "Installing skills..."
 echo "   Available: ${AVAILABLE_SKILLS[*]}"
 mkdir -p "$TARGET_PATH/.claude/skills"
 SKILLS_INSTALLED=0
+SKILLS_BACKUP_DIR=""
 for skill in "${AVAILABLE_SKILLS[@]}"; do
   if [[ -d "$REPO_ROOT/core/skills/$skill" ]]; then
     if [[ ! -L "$TARGET_PATH/.claude/skills/$skill" ]]; then
+      # Backup existing dir (not symlink) before replacing to preserve local customizations
+      if [[ -d "$TARGET_PATH/.claude/skills/$skill" ]]; then
+        if [[ -z "$SKILLS_BACKUP_DIR" ]]; then
+          SKILLS_BACKUP_DIR="$TARGET_PATH/.agentic-config.backup.$(date +%s)/skills"
+          mkdir -p "$SKILLS_BACKUP_DIR"
+        fi
+        mv "$TARGET_PATH/.claude/skills/$skill" "$SKILLS_BACKUP_DIR/$skill"
+        echo "  ⚠ Backed up: $skill → $SKILLS_BACKUP_DIR/$skill"
+      fi
       ln -sf "$REPO_ROOT/core/skills/$skill" "$TARGET_PATH/.claude/skills/$skill"
       echo "  ✓ $skill"
       ((SKILLS_INSTALLED++)) || true
@@ -332,7 +342,7 @@ done
 [[ $SKILLS_INSTALLED -eq 0 ]] && echo "  (all skills already installed)"
 
 # Clean up orphaned symlinks
-echo "🔵 Cleaning up orphaned symlinks..."
+echo "Cleaning up orphaned symlinks..."
 ORPHANS=$(cleanup_orphan_symlinks "$TARGET_PATH" ".claude/commands")
 if [[ $ORPHANS -gt 0 ]]; then
   echo "  Cleaned $ORPHANS orphan command symlink(s)"
@@ -346,4 +356,4 @@ if [[ $ORPHANS -gt 0 ]]; then
 fi
 
 echo ""
-echo "🟢 Update complete!"
+echo "Update complete!"

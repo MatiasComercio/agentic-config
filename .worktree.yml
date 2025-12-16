@@ -1,0 +1,19 @@
+# .worktree.yml - agentic-config
+# Minimal config - tooling repo with no heavy assets
+
+assets:
+  # No external assets directory
+  source: null
+
+  # Copy local settings if they exist
+  copy:
+    - .claude/settings.local.json
+
+  # No symlinks needed - outputs are per-worktree
+  symlink: []
+
+# No environments - pure markdown/yaml config repo
+environments: []
+
+# Use /branch for spec directory creation
+skip_branch_command: false

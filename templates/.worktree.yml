@@ -1,0 +1,74 @@
+# .worktree.yml - Example Template
+# Configure how /worktree command sets up new worktrees
+#
+# Place this file at your repo root (or subproject root for monorepos)
+
+assets:
+  # External assets directory (optional)
+  # - Absolute path or relative to repo root's parent
+  # - Set to null to use inference (checks for <repo>-assets sibling)
+  # - Examples:
+  #   source: ../my-project-assets
+  #   source: /shared/project-data
+  #   source: null  # auto-discover
+  source: null
+
+  # Files/directories to symlink (large, read-only, shared)
+  # Paths relative to this .worktree.yml location
+  symlink:
+    # - data/inputs          # Test fixtures
+    # - models/              # ML models
+    # - fixtures/            # Sample data
+    []
+
+  # Files to copy (secrets, per-worktree customization)
+  # Paths relative to this .worktree.yml location
+  copy:
+    # - .env                 # Environment secrets
+    # - config.local.yml     # Local overrides
+    []
+
+# Development environments to setup
+# Each gets its own isolated environment (venv, node_modules, etc.)
+environments:
+  # Python project example
+  # - path: .
+  #   type: python
+  #
+  # Node.js project example
+  # - path: frontend
+  #   type: node
+  #
+  # Monorepo with multiple services
+  # - path: services/api
+  #   type: python
+  # - path: services/web
+  #   type: node
+  []
+
+# Integration with /branch command
+# - false: Run /branch first to create branch + spec directory
+# - true: Skip /branch, just create worktree
+skip_branch_command: false
+
+# ─────────────────────────────────────────────────────────────────
+# Supported environment types:
+#
+# python:
+#   - Creates .venv with python3 -m venv
+#   - Installs requirements.txt, requirements.dev.txt, pyproject.toml
+#   - Creates .envrc for direnv integration
+#
+# node:
+#   - Runs npm/yarn/pnpm install (detects from lockfile)
+#   - Creates .envrc for direnv integration
+#
+# rust:
+#   - Runs cargo build (optional)
+#
+# go:
+#   - Runs go mod download
+#
+# ruby:
+#   - Runs bundle install
+# ─────────────────────────────────────────────────────────────────

@@ -49,7 +49,7 @@ fi
    ```
 3. **Compare and report missing symlinks:**
    - Any command in `core/commands/claude/` MUST have a corresponding symlink
-   - Report: "🔴 Missing symlink: {command}.md"
+   - Report: "ERROR: Missing symlink: {command}.md"
 4. **Offer to fix:**
    ```bash
    ln -sf ~/projects/agentic-config/core/commands/claude/{cmd}.md .claude/commands/{cmd}.md
@@ -74,15 +74,15 @@ Automatic (symlinks - already updated):
 ✓ .codex/prompts/spec.md
 
 Needs Review:
-📄 AGENTS.md template section updated
+  AGENTS.md template section updated
    - New: "Build discipline" section
    - Updated: "Git rules" with rebase macro
 
-📄 .agent/config.yml unchanged
+  .agent/config.yml unchanged
 
 New in v1.1.1:
-🔄 PROJECT_AGENTS.md migration (with --force)
-🧹 Orphan symlink cleanup
+  PROJECT_AGENTS.md migration (with --force)
+  Orphan symlink cleanup
 
 Your customizations will be preserved (migrated to PROJECT_AGENTS.md if using --force).
 ```

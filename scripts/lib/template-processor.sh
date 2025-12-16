@@ -6,7 +6,7 @@ process_template() {
   local output_file="$2"
 
   if [[ ! -f "$template_file" ]]; then
-    echo "🔴 ERROR: Template not found: $template_file" >&2
+    echo "ERROR: Template not found: $template_file" >&2
     return 1
   fi
 

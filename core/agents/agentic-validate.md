@@ -99,14 +99,14 @@ Registry:
 Issues Found: 2
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🔴 CRITICAL: Broken symlink
+CRITICAL: Broken symlink
    File: .codex/prompts/spec.md
    Issue: Target does not exist
    Fix: rm .codex/prompts/spec.md && \
         mkdir -p .codex/prompts && \
         ln -s ~/projects/agentic-config/core/agents/spec-command.md .codex/prompts/spec.md
 
-🟡 WARNING: Not in registry
+WARNING: Not in registry
    Issue: Project not tracked in central installations registry
    Fix: Re-run setup to register:
         ~/projects/agentic-config/scripts/setup-config.sh --force .

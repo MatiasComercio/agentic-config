@@ -39,6 +39,8 @@ Show what will happen:
 - **Files to be copied** (customizable):
   - `AGENTS.md` → project guidelines template
   - `.agent/config.yml` → Antigravity configuration
+- **Content preservation** (v1.2.0+):
+  - If existing `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md` is a real file (not symlink), content is preserved to `PROJECT_AGENTS.md`
 - **Backup location** if existing files present
 - **Version** to install (check ~/projects/agentic-config/VERSION)
 
@@ -58,7 +60,7 @@ Show what will happen:
 
 **Automatic setup actions** (v1.1.1+):
 - Creates `.gitignore` with sensible defaults if not present
-- Initializes git repository (`git init`) if not already a repo
+- Initializes git repository (`git init`) if not inside any git repo (including parent repos)
 
 ### 5. Post-Installation Guidance
 - Verify symlinks created successfully: `ls -la agents .claude/commands`

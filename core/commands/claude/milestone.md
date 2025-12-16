@@ -39,6 +39,7 @@ Parse `$ARGUMENTS` into:
 2. **Backlog exists**: File at `BACKLOG_PATH` must exist
 3. **Section exists**: Section `SECTION` must be found in backlog
 4. **Commits exist**: Must have commits since `BASE_BRANCH`
+5. **CHANGELOG exists**: `CHANGELOG.md` must exist with `[Unreleased]` section
 
 If any fail → STOP with specific error message.
 
@@ -98,17 +99,22 @@ Release Configuration:
 - Base: {BASE_BRANCH}
 - Version: {VERSION} (or "no tag")
 - Commits to squash: N
+- CHANGELOG: [Unreleased] → [{VERSION}]
 
 Proceed with squash? (yes/no)
 ```
 
 **On "yes":**
 1. Update backlog: mark all items `[x]`, add ✅ to section header
-2. Commit: `docs: mark {SECTION} as completed`
-3. Create backup: `{branch}-backup/{YYYY}/{MM}/{DD}/001`
-4. Soft reset to `BASE_BRANCH`
-5. Create squashed commit with comprehensive message
-6. If `VERSION`: create annotated tag
+2. **Update CHANGELOG.md:**
+   - Move all entries from `[Unreleased]` to new `[{VERSION}] - {YYYY-MM-DD}` section
+   - Keep empty `[Unreleased]` section at top
+   - If no VERSION provided, use section name as header
+3. Commit: `docs: mark {SECTION} as completed`
+4. Create backup: `{branch}-backup/{YYYY}/{MM}/{DD}/001`
+5. Soft reset to `BASE_BRANCH`
+6. Create squashed commit with comprehensive message
+7. If `VERSION`: create annotated tag
 
 → Proceed to **Phase 5: Push Confirmation**
 
@@ -182,6 +188,7 @@ Skipped push. Run manually when ready:
 | Section not found | STOP: "Section {SECTION} not found. Available: [list]" |
 | No commits to squash | STOP: "No commits between {BASE_BRANCH} and HEAD" |
 | Git dirty | STOP: "Uncommitted changes. Commit or stash first." |
+| CHANGELOG missing | STOP: "CHANGELOG.md not found or missing [Unreleased] section" |
 | User declines | STOP cleanly, no changes |
 | Push fails | STOP: show error, suggest manual resolution |
 

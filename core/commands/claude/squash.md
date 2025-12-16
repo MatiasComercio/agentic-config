@@ -5,11 +5,16 @@ project-agnostic: true
 allowed-tools:
   - Bash
   - Read
+  - Skill
 ---
 
 # Squash Command
 
 Squash all commits since base reference into a single commit.
+
+## Context Awareness
+
+**INVOKE** `git-rewrite-history` skill to gain context about safe history rewriting patterns.
 
 **Arguments:**
 - `$1` (optional): Base reference - branch name or commit hash (default: merge-base with main)
