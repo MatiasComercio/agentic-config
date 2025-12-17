@@ -198,6 +198,15 @@ fi
 
 CURRENT_VERSION=$(check_version "$TARGET_PATH")
 INSTALL_MODE=$(get_install_mode "$TARGET_PATH")
+
+# Validate INSTALL_MODE
+if [[ "$INSTALL_MODE" != "symlink" && "$INSTALL_MODE" != "copy" ]]; then
+  echo "ERROR: Invalid install_mode in .agentic-config.json: $INSTALL_MODE" >&2
+  echo "   Valid values: symlink, copy" >&2
+  echo "   Fix: Update .agentic-config.json or re-run setup-config.sh" >&2
+  exit 1
+fi
+
 echo "Agentic Configuration Update"
 echo "   Current version: $CURRENT_VERSION"
 echo "   Latest version:  $LATEST_VERSION"
@@ -302,6 +311,9 @@ if [[ "$CURRENT_VERSION" != "$LATEST_VERSION" ]]; then
   fi
 fi
 
+# Track whether copy mode replaced assets (for version tracking)
+COPY_MODE_REPLACED=false
+
 # Handle copy mode updates
 if [[ "$INSTALL_MODE" == "copy" && "$CURRENT_VERSION" != "$LATEST_VERSION" ]]; then
   echo ""
@@ -354,13 +366,15 @@ if [[ "$INSTALL_MODE" == "copy" && "$CURRENT_VERSION" != "$LATEST_VERSION" ]]; t
   # Replace with latest versions (with backup verification)
   REPLACED_ITEMS=()
   if [[ -d "$TARGET_PATH/agents" && ! -L "$TARGET_PATH/agents" ]]; then
-    # Verify backup was successful before deleting
-    if [[ -d "$COPY_BACKUP_DIR/agents" ]]; then
+    # Verify backup was successful before deleting (check directory exists and has content)
+    BACKUP_COUNT=$(find "$COPY_BACKUP_DIR/agents" -type f 2>/dev/null | wc -l | tr -d ' ')
+    ORIGINAL_COUNT=$(find "$TARGET_PATH/agents" -type f 2>/dev/null | wc -l | tr -d ' ')
+    if [[ -d "$COPY_BACKUP_DIR/agents" && "$BACKUP_COUNT" -ge "$ORIGINAL_COUNT" ]]; then
       rm -rf "$TARGET_PATH/agents"
       cp -r "$REPO_ROOT/core/agents" "$TARGET_PATH/agents"
       REPLACED_ITEMS+=("agents/")
     else
-      echo "   WARNING: Backup verification failed for agents/ - skipping replacement"
+      echo "   WARNING: Backup verification failed for agents/ (expected $ORIGINAL_COUNT files, got $BACKUP_COUNT) - skipping replacement"
     fi
   fi
 
@@ -389,16 +403,27 @@ if [[ "$INSTALL_MODE" == "copy" && "$CURRENT_VERSION" != "$LATEST_VERSION" ]]; t
     fi
   done
 
-  # Copy all agentic management agents
+  # Copy all agentic management agents (update existing + install new)
   for agent_file in "$REPO_ROOT/core/agents/agentic-"*.md; do
     agent=$(basename "$agent_file")
     if [[ -f "$TARGET_PATH/.claude/agents/$agent" && ! -L "$TARGET_PATH/.claude/agents/$agent" ]]; then
+      # Update existing copied agent
       cp "$agent_file" "$TARGET_PATH/.claude/agents/$agent"
       REPLACED_ITEMS+=(".claude/agents/$agent")
+    elif [[ ! -e "$TARGET_PATH/.claude/agents/$agent" ]]; then
+      # Install new agent that doesn't exist yet
+      cp "$agent_file" "$TARGET_PATH/.claude/agents/$agent"
+      REPLACED_ITEMS+=(".claude/agents/$agent (new)")
     fi
   done
 
   echo "   Replaced ${#REPLACED_ITEMS[@]} item(s) with latest versions"
+
+  # Track that copy mode made replacements (for version tracking)
+  if [[ ${#REPLACED_ITEMS[@]} -gt 0 ]]; then
+    COPY_MODE_REPLACED=true
+  fi
+
   echo ""
   echo "IMPORTANT: Copy mode update complete"
   echo "   Review changes and manually merge any customizations from backup"
@@ -477,8 +502,9 @@ if [[ $ORPHANS -gt 0 ]]; then
 fi
 
 # Update version tracking (only after all operations complete)
+# Always update version when: force mode, no pending config changes, or copy mode replaced assets
 if [[ "$CURRENT_VERSION" != "$LATEST_VERSION" ]]; then
-  if [[ "$FORCE" == true || "${HAS_CONFIG_CHANGES:-false}" == false ]]; then
+  if [[ "$FORCE" == true || "${HAS_CONFIG_CHANGES:-false}" == false || "$COPY_MODE_REPLACED" == true ]]; then
     echo "Updating version tracking..."
     TIMESTAMP="$(date -Iseconds 2>/dev/null || date +%Y-%m-%dT%H:%M:%S%z)"
     if command -v jq &>/dev/null; then

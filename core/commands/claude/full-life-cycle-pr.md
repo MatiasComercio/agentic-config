@@ -69,11 +69,34 @@ git fetch origin main 2>/dev/null || git fetch origin master 2>/dev/null
 ### 1.2 Argument Validation
 
 ```bash
-# Parse arguments safely (avoid command injection)
-IFS=' ' read -ra ARGS <<< "$ARGUMENTS"
-BRANCH_NAME="${ARGS[0]}"
-SPEC_ARG="${ARGS[1]}"
-MODIFIER="${ARGS[2]:-normal}"
+# Parse arguments safely, respecting quoted strings
+# Pattern: <branch-name> <"spec arg" or path> [modifier]
+BRANCH_NAME=""
+SPEC_ARG=""
+MODIFIER="normal"
+
+# Extract branch name (first unquoted word)
+BRANCH_NAME=$(echo "$ARGUMENTS" | awk '{print $1}')
+REMAINING=$(echo "$ARGUMENTS" | sed "s/^[^ ]* *//")
+
+# Extract SPEC_ARG (handles quoted strings or single word)
+if [[ "$REMAINING" =~ ^\"([^\"]*)\" ]]; then
+  # Quoted string: "Add new feature"
+  SPEC_ARG="${BASH_REMATCH[1]}"
+  REMAINING=$(echo "$REMAINING" | sed 's/^"[^"]*" *//')
+elif [[ "$REMAINING" =~ ^\'([^\']*)\' ]]; then
+  # Single-quoted string: 'Add new feature'
+  SPEC_ARG="${BASH_REMATCH[1]}"
+  REMAINING=$(echo "$REMAINING" | sed "s/^'[^']*' *//")
+else
+  # Unquoted: assume single word (path or simple arg)
+  SPEC_ARG=$(echo "$REMAINING" | awk '{print $1}')
+  REMAINING=$(echo "$REMAINING" | sed "s/^[^ ]* *//")
+fi
+
+# Extract modifier (remaining first word, default: normal)
+MODIFIER=$(echo "$REMAINING" | awk '{print $1}')
+[[ -z "$MODIFIER" ]] && MODIFIER="normal"
 
 # Validate branch name exists
 if [ -z "$BRANCH_NAME" ]; then

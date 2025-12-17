@@ -137,6 +137,8 @@ TARGET_PATH="$(cd "$TARGET_PATH" && pwd)"
 
 echo "Agentic Configuration Setup v$VERSION"
 echo "   Target: $TARGET_PATH"
+[[ "$COPY_MODE" == true ]] && echo "   Mode: copy"
+[[ "$DRY_RUN" == true ]] && echo "   (DRY RUN)"
 
 # Auto-detect project type if not specified
 if [[ -z "$PROJECT_TYPE" ]]; then

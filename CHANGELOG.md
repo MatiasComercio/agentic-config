@@ -4,6 +4,16 @@ All notable changes to agentic-config.
 
 ## [Unreleased]
 
+### Fixed
+
+- New agentic-*.md agents now installed for copy mode users during update (previously only existing agents were updated)
+- SPEC_ARG with spaces now handled correctly in `/full-life-cycle-pr` (quoted strings parsed properly)
+- Version tracking now always updates when copy mode replaces assets (previously could skip if template changes pending)
+- Backup verification for agents/ now validates file count (not just directory existence) to catch partial backups
+- Invalid INSTALL_MODE values now rejected with clear error message during update
+- Documentation inconsistency in `/milestone` (removed `--no-tag` alias, only `--skip-tag` supported)
+- Dry-run output in `setup-config.sh` now shows copy mode indicator
+
 ## [0.1.7] - 2025-12-17
 
 ### Added

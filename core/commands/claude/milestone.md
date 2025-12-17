@@ -35,7 +35,7 @@ Parse `$ARGUMENTS` into:
 **Parsing Rules:**
 - If an argument starts and ends with `"`, treat as `VALIDATION_PROMPT`
 - Version is optional; if 4th arg is quoted, there's no version
-- If `--skip-tag` or `--no-tag` flag is present anywhere in arguments, set `SKIP_TAG=true`
+- If `--skip-tag` flag is present anywhere in arguments, set `SKIP_TAG=true`
 - Empty `$ARGUMENTS` triggers full auto-detect mode
 
 ## Phase 0: Smart Defaults Resolution
