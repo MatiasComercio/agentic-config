@@ -30,3 +30,26 @@ This project uses Conventional Commits (https://conventionalcommits.org) with ex
 
 - Add new entries to `[Unreleased]` section
 - DO NOT modify already released/tagged versions unless explicitly requested
+
+## Exceptions
+
+The following are explicitly permitted as exceptions to the rules above:
+
+### Git Commit Author Identity
+
+Commits may be authored by:
+- Personal identity (repository maintainer)
+- Claude (AI assistant): `Co-Authored-By: Claude <noreply@anthropic.com>`
+
+This is acceptable because git history attribution is separate from content anonymization.
+
+### Emojis in Specific Files
+
+The following files may contain emojis for functional purposes (status indicators, visual signals):
+- `core/agents/agentic-validate.md` - validation status markers
+- `core/agents/agentic-status.md` - status display formatting
+- `core/agents/agentic-update.md` - update status indicators
+- `core/agents/agentic-customize.md` - customization status
+- `core/commands/claude/milestone.md` - milestone status markers
+
+These emojis serve as machine-readable status signals in agent output, not decorative content.

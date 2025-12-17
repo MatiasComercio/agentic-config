@@ -4,6 +4,14 @@ All notable changes to agentic-config.
 
 ## [Unreleased]
 
+### Fixed
+
+- 5 symlinks converted from absolute to relative paths for portability (.gemini/commands/spec, .gemini/commands/spec.toml, agents, .codex/prompts/spec.md, .agent/workflows/spec.md)
+
+### Changed
+
+- PROJECT_AGENTS.md now documents exceptions for git commit author identity and functional emojis in specific agent files
+
 ## [0.1.8] - 2025-12-17
 
 ### Fixed

@@ -1,1 +1,1 @@
-/Users/matias/projects/agentic-config/core/commands/codex/spec.md
+../../core/commands/codex/spec.md
