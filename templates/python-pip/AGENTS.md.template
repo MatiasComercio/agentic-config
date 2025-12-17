@@ -2,13 +2,13 @@
 
 ## Environment & Tooling
 - **Package Manager:** pip
-- **Type Checking:** mypy <path>
-- **Linting:** pylint <path>
+- **Type Checking:** {{TYPE_CHECKER}}
+- **Linting:** {{LINTER_CMD}}
 - **Build:** Only when explicitly requested
 
 ## Style & Conventions
 - Type hints for all public functions, descriptive names, small pure functions
-- After edits: pylint <file> && mypy <file>
+- After edits: {{LINTER_AFTER_EDIT}} <file> && {{TYPE_CHECKER}} <file>
 
 ## Core Principles
 - Verify over assume

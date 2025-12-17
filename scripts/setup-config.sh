@@ -46,6 +46,8 @@ COPY_MODE=false
 NO_REGISTRY=false
 TOOLS="all"
 PROJECT_TYPE=""
+TYPE_CHECKER=""
+LINTER=""
 
 # Usage
 usage() {
@@ -63,6 +65,10 @@ Options:
   --no-registry          Don't register installation in central registry
   --tools <claude,gemini,codex,all>
                          Which AI tool configs to install (default: all)
+  --type-checker <pyright|mypy>
+                         Python type checker (default: pyright, auto-detected)
+  --linter <ruff|pylint>
+                         Python linter (default: ruff, auto-detected)
   -h, --help             Show this help message
 
 Examples:
@@ -103,6 +109,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --tools)
       TOOLS="$2"
+      shift 2
+      ;;
+    --type-checker)
+      TYPE_CHECKER="$2"
+      shift 2
+      ;;
+    --linter)
+      LINTER="$2"
       shift 2
       ;;
     -h|--help)
@@ -146,6 +160,29 @@ if [[ -z "$PROJECT_TYPE" ]]; then
   echo "   Detected type: $PROJECT_TYPE"
 else
   echo "   Type: $PROJECT_TYPE"
+fi
+
+# Auto-detect Python tooling for python-pip projects
+if [[ "$PROJECT_TYPE" == "python-pip" ]]; then
+  # Save CLI-provided values
+  cli_type_checker="$TYPE_CHECKER"
+  cli_linter="$LINTER"
+
+  # Get autodetected values if not specified via CLI
+  if [[ -z "$TYPE_CHECKER" || -z "$LINTER" ]]; then
+    detected=$(detect_python_tooling "$TARGET_PATH")
+    # Parse the detected values (this sets TYPE_CHECKER and LINTER)
+    eval "$detected"
+
+    # Restore CLI-provided values if they were set (CLI overrides autodetection)
+    [[ -n "$cli_type_checker" ]] && TYPE_CHECKER="$cli_type_checker"
+    [[ -n "$cli_linter" ]] && LINTER="$cli_linter"
+  fi
+
+  # Apply defaults if still empty (shouldn't happen as detect_python_tooling provides defaults)
+  [[ -z "$TYPE_CHECKER" ]] && TYPE_CHECKER="pyright"
+  [[ -z "$LINTER" ]] && LINTER="ruff"
+  echo "   Tooling: $TYPE_CHECKER + $LINTER"
 fi
 
 # Validate template exists
@@ -269,7 +306,24 @@ fi
 echo "Installing config templates ($PROJECT_TYPE)..."
 if [[ "$DRY_RUN" != true ]]; then
   process_template "$TEMPLATE_DIR/.agent/config.yml.template" "$TARGET_PATH/.agent/config.yml"
-  process_template "$TEMPLATE_DIR/AGENTS.md.template" "$TARGET_PATH/AGENTS.md"
+
+  # Pass tooling variables for python-pip template
+  if [[ "$PROJECT_TYPE" == "python-pip" ]]; then
+    # Build LINTER_CMD and LINTER_AFTER_EDIT based on linter type
+    linter_cmd=""
+    linter_after_edit=""
+    if [[ "$LINTER" == "ruff" ]]; then
+      linter_cmd="ruff check [--fix] <path>"
+      linter_after_edit="ruff check --fix"
+    else
+      linter_cmd="pylint <path>"
+      linter_after_edit="pylint"
+    fi
+    process_template "$TEMPLATE_DIR/AGENTS.md.template" "$TARGET_PATH/AGENTS.md" \
+      "TYPE_CHECKER=$TYPE_CHECKER" "LINTER=$LINTER" "LINTER_CMD=$linter_cmd" "LINTER_AFTER_EDIT=$linter_after_edit"
+  else
+    process_template "$TEMPLATE_DIR/AGENTS.md.template" "$TARGET_PATH/AGENTS.md"
+  fi
 fi
 
 # Create local symlinks

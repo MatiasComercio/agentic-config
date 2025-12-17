@@ -4,6 +4,19 @@ All notable changes to agentic-config.
 
 ## [Unreleased]
 
+### Added
+
+- `--type-checker` and `--linter` CLI flags for `setup-config.sh` to specify Python tooling variants
+- Autodetection of existing Python tooling from pyproject.toml, setup.cfg, and requirements*.txt
+- `detect_python_tooling()` function in `scripts/lib/detect-project-type.sh` for tooling detection
+- `{{VAR}}` placeholder substitution support in `scripts/lib/template-processor.sh`
+- `scripts/test-python-tooling-variants.sh` test suite (17 tests) for variant validation
+
+### Changed
+
+- python-pip template default tooling from mypy+pylint to pyright+ruff (aligns with python-uv and python-poetry)
+- `templates/python-pip/AGENTS.md.template` now uses variable placeholders for configurable tooling
+
 ## [0.1.9] - 2025-12-17
 
 ### Fixed
