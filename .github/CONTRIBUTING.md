@@ -20,7 +20,7 @@ Thank you for your interest in contributing!
 |-------|-------------|
 | `priority: critical` | Must fix immediately |
 | `priority: high` | Important, fix soon |
-| `low-priority` | Nice to have, not urgent |
+| `priority: low` | Nice to have, not urgent |
 
 ### Status Labels
 
