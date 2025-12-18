@@ -57,7 +57,7 @@ Usage: setup-config.sh [OPTIONS] <target_path>
 Install centralized agentic configuration to a project.
 
 Options:
-  --type <ts|py-poetry|py-pip|py-uv|rust|generic>
+  --type <ts|bun|py-poetry|py-pip|py-uv|rust|generic>
                          Project type (auto-detected if not specified)
   --copy                 Copy assets instead of creating symlinks
   --force                Overwrite existing configuration
@@ -167,11 +167,14 @@ case "$PROJECT_TYPE" in
   ts)
     PROJECT_TYPE="typescript"
     ;;
+  bun)
+    PROJECT_TYPE="ts-bun"
+    ;;
   py-poetry|py-pip|py-uv)
     # Map py-* aliases to python-* template names
     PROJECT_TYPE="python-${PROJECT_TYPE#py-}"
     ;;
-  # All other types pass through unchanged (typescript, python-poetry, python-pip, python-uv, rust, generic)
+  # All other types pass through unchanged (typescript, ts-bun, python-*, rust, generic)
 esac
 
 # Auto-detect Python tooling for python-pip projects
@@ -201,7 +204,7 @@ fi
 TEMPLATE_DIR="$REPO_ROOT/templates/$PROJECT_TYPE"
 if [[ ! -d "$TEMPLATE_DIR" ]]; then
   echo "ERROR: No template for project type: $PROJECT_TYPE" >&2
-  echo "   Available: typescript, python-poetry, python-pip, python-uv, rust, generic" >&2
+  echo "   Available: ts, bun, py-poetry, py-pip, py-uv, rust, generic" >&2
   exit 1
 fi
 
