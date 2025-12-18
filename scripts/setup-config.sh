@@ -162,6 +162,18 @@ else
   echo "   Type: $PROJECT_TYPE"
 fi
 
+# Normalize project type aliases to full template names
+case "$PROJECT_TYPE" in
+  ts)
+    PROJECT_TYPE="typescript"
+    ;;
+  py-poetry|py-pip|py-uv)
+    # Map py-* aliases to python-* template names
+    PROJECT_TYPE="python-${PROJECT_TYPE#py-}"
+    ;;
+  # All other types pass through unchanged (typescript, python-poetry, python-pip, python-uv, rust, generic)
+esac
+
 # Auto-detect Python tooling for python-pip projects
 if [[ "$PROJECT_TYPE" == "python-pip" ]]; then
   # Save CLI-provided values

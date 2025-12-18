@@ -7,6 +7,7 @@ All notable changes to agentic-config.
 ### Fixed
 
 - Renamed `low-priority` label to `priority: low` for consistency
+- `py-uv` alias now correctly maps to `python-uv` template in setup script (fixes #8)
 
 ## [0.1.11] - 2025-12-17
 
