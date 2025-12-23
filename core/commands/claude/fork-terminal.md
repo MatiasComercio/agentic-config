@@ -33,14 +33,14 @@ Open a new kitty terminal tab or window, cd to specified path, and optionally ru
    - Activate kitty
    - Open new tab (cmd+t) or window (cmd+n) based on MODE
    - Add delay 0.5 for UI sync
-   - Type: `cd {PATH} && clear && {CMD}`
+   - Type: `cd {WORK_PATH} && clear && {CMD}`
    - Press return
 
 4. HANDLE prime_prompt:
    - If PRIME_PROMPT provided and CMD is "claude":
      - Check if cload is available (command -v cload)
-     - If available: use `cd {PATH} && clear && cload {PRIME_PROMPT} | claude`
-     - Otherwise: just run `cd {PATH} && clear && {CMD}` (user must paste prompt)
+     - If available: use `cd {WORK_PATH} && clear && cload {PRIME_PROMPT} | claude`
+     - Otherwise: just run `cd {WORK_PATH} && clear && {CMD}` (user must paste prompt)
    - If PRIME_PROMPT provided but CMD is not "claude":
      - Warn user that prime_prompt only works with claude command
      - Run without prime_prompt

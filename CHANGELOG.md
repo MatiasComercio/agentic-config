@@ -6,8 +6,10 @@ All notable changes to agentic-config.
 
 ### Added
 
+- `/po_spec` command for phased spec orchestration (multi-phase feature decomposition with DAG execution)
+- `product-manager` skill for decomposing large features into concrete development phases
 - `--auto` flag for `/milestone` to skip all confirmation gates (autonomous execution)
-- Workflow state persistence for `/full-life-cycle-pr` and `/o_spec` commands
+- Workflow state persistence for `/full-life-cycle-pr`, `/o_spec`, and `/po_spec` commands
   - Session-based state tracking in `outputs/orc/{YYYY}/{MM}/{DD}/{HHMMSS}-{UUID}/workflow_state.yml`
   - Automatic resume detection for interrupted workflows
   - AI-interpreted state updates with current step/stage tracking

@@ -160,20 +160,17 @@ if [ -d "$STATE_DIR" ]; then
     if [ -f "$state_file" ]; then
       CMD=$(grep -E '^command:' "$state_file" 2>/dev/null | cut -d'"' -f2)
       STATUS=$(grep -E '^status:' "$state_file" 2>/dev/null | cut -d'"' -f2)
-      STATE_BRANCH=$(grep -E '^\s*branch_name:' "$state_file" 2>/dev/null | cut -d'"' -f2)
       if [ "$CMD" = "full-life-cycle-pr" ] && [ "$STATUS" = "in_progress" ]; then
-        # Only show if branch matches current arguments (or if resuming without args)
-        if [ -z "$BRANCH_NAME" ] || [ "$STATE_BRANCH" = "$BRANCH_NAME" ]; then
-          echo "=========================================="
-          echo "EXISTING IN-PROGRESS SESSION DETECTED"
-          echo "=========================================="
-          echo "Session: $(dirname "$state_file")"
-          echo "Branch: $STATE_BRANCH"
-          echo ""
-          cat "$state_file"
-          echo ""
-          echo "Options: 'resume' to continue, 'fresh' to start new session"
-        fi
+        STATE_BRANCH=$(grep -E '^\s*branch_name:' "$state_file" 2>/dev/null | cut -d'"' -f2)
+        echo "=========================================="
+        echo "EXISTING IN-PROGRESS SESSION DETECTED"
+        echo "=========================================="
+        echo "Session: $(dirname "$state_file")"
+        echo "Branch: $STATE_BRANCH"
+        echo ""
+        cat "$state_file"
+        echo ""
+        echo "Options: 'resume' to continue, 'fresh' to start new session"
       fi
     fi
   done
