@@ -454,7 +454,7 @@ for cmd in "${AVAILABLE_CMDS[@]}"; do
         cp "$REPO_ROOT/core/commands/claude/$cmd.md" "$TARGET_PATH/.claude/commands/$cmd.md"
       else
         # Use relative path from .claude/commands/ to core/commands/claude/
-        local rel_target="../../core/commands/claude/$cmd.md"
+        rel_target="../../core/commands/claude/$cmd.md"
         (cd "$TARGET_PATH/.claude/commands" && ln -sf "$rel_target" "$cmd.md")
       fi
       echo "  ✓ $cmd.md"
@@ -478,7 +478,7 @@ for skill in "${AVAILABLE_SKILLS[@]}"; do
         cp -r "$REPO_ROOT/core/skills/$skill" "$TARGET_PATH/.claude/skills/$skill"
       else
         # Use relative path from .claude/skills/ to core/skills/
-        local rel_target="../../core/skills/$skill"
+        rel_target="../../core/skills/$skill"
         (cd "$TARGET_PATH/.claude/skills" && ln -sf "$rel_target" "$skill")
       fi
       echo "  ✓ $skill"
@@ -493,7 +493,7 @@ for skill in "${AVAILABLE_SKILLS[@]}"; do
         mv "$TARGET_PATH/.claude/skills/$skill" "$SKILLS_BACKUP_DIR/$skill"
         echo "  ⚠ Backed up: $skill → $SKILLS_BACKUP_DIR/$skill"
         # Use relative path from .claude/skills/ to core/skills/
-        local rel_target="../../core/skills/$skill"
+        rel_target="../../core/skills/$skill"
         (cd "$TARGET_PATH/.claude/skills" && ln -sf "$rel_target" "$skill")
         echo "  ✓ $skill (converted to symlink)"
         ((SKILLS_INSTALLED++)) || true

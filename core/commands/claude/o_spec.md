@@ -327,12 +327,13 @@ REPORT PROGRESSIVE CONCISE YET INSIGHTFUL updates to me, your manager, as you pr
 
 If user interrupts workflow:
 1. **Read state file**: Load `workflow_state.yml` from session directory
-2. **Identify current position**: Use `current_step` and `current_stage` values
+2. **Identify current position**: Use `current_stage` value (stage name, not step number)
 3. **Resume options**:
-   - `resume` - Continue from current_step in state file
-   - `resume from step X` - Override to specific step number
-   - `resume from STAGE` - Override to specific stage (CREATE, RESEARCH, etc.)
+   - `resume` - Continue from `current_stage` in state file
+   - `resume from STAGE` - Override to specific stage (CREATE, RESEARCH, PLAN, IMPLEMENT, REVIEW, TEST, DOCUMENT)
 4. **Update state**: On resume, update `updated_at` and continue workflow
+
+**IMPORTANT**: Always resume by stage name, not step number. Step numbers vary by modifier (e.g., IMPLEMENT is step 5 in FULL, step 4 in NORMAL, step 3 in LEAN). The state file stores `current_stage` to ensure correct resumption regardless of modifier.
 
 ## Interruption Handling
 

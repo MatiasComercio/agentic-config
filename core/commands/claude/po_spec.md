@@ -142,18 +142,15 @@ resume_instruction: "Resume with: /po_spec resume"
 Check for existing in-progress po_spec session:
 
 ```bash
-for dir in outputs/phases/*/; do
-  for session in "$dir"/*/; do
-    STATE_FILE="${session}workflow_state.yml"
-    if [ -f "$STATE_FILE" ]; then
-      CMD=$(grep -E '^command:' "$STATE_FILE" | cut -d'"' -f2)
-      STATUS=$(grep -E '^status:' "$STATE_FILE" | cut -d'"' -f2)
-      if [ "$CMD" = "po_spec" ] && [ "$STATUS" = "in_progress" ]; then
-        echo "Found: $STATE_FILE"
-        cat "$STATE_FILE"
-      fi
+for state_file in outputs/phases/*/*/*/*/workflow_state.yml; do
+  if [ -f "$state_file" ]; then
+    CMD=$(grep -E '^command:' "$state_file" | cut -d'"' -f2)
+    STATUS=$(grep -E '^status:' "$state_file" | cut -d'"' -f2)
+    if [ "$CMD" = "po_spec" ] && [ "$STATUS" = "in_progress" ]; then
+      echo "Found: $state_file"
+      cat "$state_file"
     fi
-  done
+  fi
 done 2>/dev/null
 ```
 

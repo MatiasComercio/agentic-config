@@ -93,30 +93,30 @@ osascript -e 'tell application "kitty" to activate' \
 
 ## VARIABLES
 
-# Generate UUID if PATH not provided
+# Generate UUID if WORK_PATH not provided
 UUID=$(uuidgen | tr '[:upper:]' '[:lower:]' | cut -c1-8)
 DEFAULT_PATH="/tmp/claude/${UUID}"
-PATH=${1:-$DEFAULT_PATH}
+WORK_PATH=${1:-$DEFAULT_PATH}
 
-# Validate PATH is not dangerous
+# Validate WORK_PATH is not dangerous
 # (validation logic per spec details section 2)
 
-case "$PATH" in
-  /|/bin|/usr|/etc|/System|/sbin|/Library)
-    echo "ERROR: Refusing to execute in dangerous system directory: $PATH" >&2
+case "$WORK_PATH" in
+  /|/bin|/usr|/etc|/System|/sbin|/Library|/var|/private|/opt)
+    echo "ERROR: Refusing to execute in dangerous system directory: $WORK_PATH" >&2
     exit 1
     ;;
-  /bin/*|/usr/*|/etc/*|/System/*|/sbin/*|/Library/*)
-    echo "ERROR: Refusing to execute in dangerous system directory: $PATH" >&2
+  /bin/*|/usr/*|/etc/*|/System/*|/sbin/*|/Library/*|/var/*|/private/*|/opt/*)
+    echo "ERROR: Refusing to execute in dangerous system directory: $WORK_PATH" >&2
     exit 1
     ;;
 esac
 
 # Create directory if it doesn't exist
-if [ ! -d "$PATH" ]; then
-  echo "Creating directory: $PATH"
-  mkdir -p "$PATH" || {
-    echo "ERROR: Failed to create directory: $PATH" >&2
+if [ ! -d "$WORK_PATH" ]; then
+  echo "Creating directory: $WORK_PATH"
+  mkdir -p "$WORK_PATH" || {
+    echo "ERROR: Failed to create directory: $WORK_PATH" >&2
     exit 1
   }
 fi
