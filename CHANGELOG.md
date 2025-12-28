@@ -10,7 +10,18 @@ All notable changes to agentic-config.
   - Sets dry_run flag in session state, executes commands with read-only constraint
   - Prevents all file writes except outputs/session/status.yml during simulation
   - Useful for testing workflows safely (e.g., `/dry-run /po_spec path/to/spec.md`)
-  - AGENTS.md verification ensures Write/Edit/NotebookEdit operations respect dry-run mode
+- Pretooluse hook for hard enforcement of dry-run mode
+  - Blocks Write, Edit, NotebookEdit tools when dry_run flag is enabled
+  - Analyzes Bash commands to detect file-writing operations
+  - Session status file (outputs/session/status.yml) exempt from blocking
+  - Fail-open principle: allows operations on errors to prevent blocking legitimate work
+  - Installed automatically during setup, migrate, and update workflows
+
+### Changed
+
+- Dry-run enforcement migrated from instruction-based to hook-based
+  - Removed AGENTS.md dry-run verification section (replaced by pretooluse hook)
+  - Hard enforcement at Claude Code tool level prevents accidental file modifications
 
 ### Fixed
 

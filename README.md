@@ -75,6 +75,7 @@ AGENTIC_CONFIG_DIR=~/custom/path curl -sL https://raw.githubusercontent.com/Mati
 - `agents/` - Core workflow definitions (RESEARCH, PLAN, IMPLEMENT, etc.)
 - `.agent/workflows/spec.md` - Antigravity workflow integration
 - `.claude/commands/spec.md` - Claude Code command integration
+- `.claude/hooks/pretooluse/dry-run-guard.py` - Dry-run mode enforcement hook
 - `.gemini/commands/spec.toml` - Gemini CLI command integration
 - `.codex/prompts/spec.md` - Codex CLI prompt (uses proper codex command file)
 
@@ -215,9 +216,10 @@ The `/init` command repairs symlinks in the **agentic-config repository itself**
 
 **What it does:**
 ```
-.claude/commands/*.md  → ../../core/commands/claude/*.md  (relative symlinks)
-.claude/skills/*       → ../../core/skills/*              (relative symlinks)
-.claude/agents/*.md    → ../../core/agents/*.md           (relative symlinks)
+.claude/commands/*.md                   → ../../core/commands/claude/*.md          (relative symlinks)
+.claude/skills/*                        → ../../core/skills/*                       (relative symlinks)
+.claude/agents/*.md                     → ../../core/agents/*.md                    (relative symlinks)
+.claude/hooks/pretooluse/dry-run-guard.py → ../../../core/hooks/pretooluse/dry-run-guard.py (relative symlinks)
 ```
 
 **Usage:**

@@ -33,6 +33,7 @@ Show what will happen:
 - **Symlinks to be created:**
   - `agents/` → central workflow definitions
   - `.claude/commands/spec.md` → Claude integration
+  - `.claude/hooks/pretooluse/` → Claude Code hooks
   - `.gemini/commands/spec.toml` → Gemini integration
   - `.codex/prompts/spec.md` → Codex integration
   - `.agent/workflows/spec.md` → Antigravity integration
@@ -136,6 +137,7 @@ Only stage files created/modified by setup:
 - `.gitignore` (if created)
 - `agents/` (symlink)
 - `.claude/` directory
+- `.claude/hooks/` directory
 - `.gemini/` directory
 - `.codex/` directory
 - `.agent/` directory

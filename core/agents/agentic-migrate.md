@@ -43,6 +43,7 @@ Migration will:
 - Replace agents/ with symlink
 - Preserve AGENTS.md custom content
 - Install version X.Y.Z from central repo
+- Install pretooluse hooks
 
 Proceed? [y/N]
 ```
@@ -135,6 +136,7 @@ Only stage files created/modified by migration:
 - `PROJECT_AGENTS.md` (if created with customizations)
 - `agents/` (symlink replacing directory)
 - `.claude/` directory
+- `.claude/hooks/` directory
 - `.gemini/` directory
 - `.codex/` directory
 - `.agent/` directory

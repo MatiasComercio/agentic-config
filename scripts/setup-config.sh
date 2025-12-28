@@ -352,6 +352,17 @@ if [[ "$DRY_RUN" != true ]]; then
   fi
 fi
 
+# Install hooks
+echo "Installing hooks..."
+if [[ "$DRY_RUN" != true ]]; then
+  mkdir -p "$TARGET_PATH/.claude/hooks/pretooluse"
+  if [[ "$COPY_MODE" == true ]]; then
+    cp "$REPO_ROOT/core/hooks/pretooluse/dry-run-guard.py" "$TARGET_PATH/.claude/hooks/pretooluse/dry-run-guard.py"
+  else
+    ln -sf "$REPO_ROOT/core/hooks/pretooluse/dry-run-guard.py" "$TARGET_PATH/.claude/hooks/pretooluse/dry-run-guard.py"
+  fi
+fi
+
 # Install templates
 echo "Installing config templates ($PROJECT_TYPE)..."
 if [[ "$DRY_RUN" != true ]]; then

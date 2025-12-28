@@ -1,0 +1,181 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["pyyaml"]
+# ///
+"""
+Pretooluse hook for Claude Code that enforces dry-run mode.
+
+Blocks file-writing operations when outputs/session/status.yml contains dry_run: true.
+Fail-open principle: allow operations if hook encounters errors.
+"""
+
+import json
+import sys
+from pathlib import Path
+from typing import TypedDict
+
+try:
+    import yaml
+except ImportError:
+    # Fail-open if dependencies missing
+    print(json.dumps({"decision": "allow"}))
+    sys.exit(0)
+
+
+class ToolInput(TypedDict, total=False):
+    """Tool parameters from Claude Code."""
+    file_path: str
+    command: str
+
+
+class HookInput(TypedDict):
+    """JSON input received via stdin."""
+    tool_name: str
+    tool_input: ToolInput
+
+
+class HookOutput(TypedDict):
+    """JSON output returned via stdout."""
+    decision: str  # "allow" | "block"
+    message: str | None
+
+
+# Read-only Bash commands (safe during dry-run)
+SAFE_BASH_COMMANDS = {
+    "ls", "cat", "head", "tail", "grep", "find", "which", "pwd", "env", "date",
+    "uname", "wc", "sort", "uniq", "cut", "tr", "sed", "awk", "basename",
+    "dirname", "realpath", "readlink", "file", "stat", "test", "[", "[[",
+    "git status", "git diff", "git log", "git branch", "git show", "git rev-parse",
+    "echo", "printf", "true", "false", "yes", "no"
+}
+
+# File-writing patterns in Bash (dangerous during dry-run)
+WRITE_PATTERNS = [
+    ">", ">>",  # Redirects
+    "cp ", "mv ", "rm ", "touch ", "mkdir ",  # File ops
+    "tee ", "dd ", "install ",  # Write tools
+    "git add", "git commit", "git push", "git tag", "git stash",  # Git writes
+    "npm install", "yarn install", "pip install", "cargo build",  # Package managers
+]
+
+
+def is_dry_run_enabled() -> bool:
+    """Check if dry-run mode is enabled in session status."""
+    try:
+        status_file = Path("outputs/session/status.yml")
+        if not status_file.exists():
+            return False
+
+        with status_file.open("r") as f:
+            data = yaml.safe_load(f)
+
+        return bool(data.get("dry_run", False))
+    except Exception:
+        # Fail-open: if we can't read status, assume dry-run is disabled
+        return False
+
+
+def is_session_status_file(file_path: str | None) -> bool:
+    """Check if file is the session status file (exception to dry-run blocking)."""
+    if not file_path:
+        return False
+
+    try:
+        path = Path(file_path).resolve()
+        status_path = Path("outputs/session/status.yml").resolve()
+        return path == status_path
+    except Exception:
+        return False
+
+
+def is_bash_write_command(command: str) -> bool:
+    """Analyze Bash command to detect file-writing operations."""
+    # Quick check for write patterns
+    for pattern in WRITE_PATTERNS:
+        if pattern in command:
+            return True
+
+    # Check if it's a known safe command (exact match or starts with safe command)
+    for safe_cmd in SAFE_BASH_COMMANDS:
+        if command.strip() == safe_cmd or command.strip().startswith(f"{safe_cmd} "):
+            return False
+
+    # Conservative: if we're unsure, treat as potentially writing
+    # Exception: pure variable assignment, cd, export, source are safe
+    safe_keywords = ["cd ", "export ", "source ", "set ", "unset ", "alias ", "type "]
+    if any(command.strip().startswith(kw) for kw in safe_keywords):
+        return False
+
+    # If command is very simple (no special chars), likely safe read
+    if len(command.strip().split()) == 1:
+        return False
+
+    return False  # Default to allowing (fail-open)
+
+
+def should_block_tool(tool_name: str, tool_input: ToolInput) -> tuple[bool, str | None]:
+    """
+    Determine if tool should be blocked based on dry-run status.
+
+    Returns:
+        (should_block, message): Tuple of block decision and optional message
+    """
+    # Check dry-run status
+    if not is_dry_run_enabled():
+        return False, None
+
+    # Exception: always allow session status file modifications
+    file_path = tool_input.get("file_path")
+    if is_session_status_file(file_path):
+        return False, None
+
+    # Block Write tool
+    if tool_name == "Write":
+        return True, f"Blocked by dry-run mode. Would write to: {file_path}"
+
+    # Block Edit tool
+    if tool_name == "Edit":
+        return True, f"Blocked by dry-run mode. Would edit: {file_path}"
+
+    # Block NotebookEdit tool
+    if tool_name == "NotebookEdit":
+        notebook_path = tool_input.get("notebook_path") or file_path
+        return True, f"Blocked by dry-run mode. Would edit notebook: {notebook_path}"
+
+    # Analyze Bash commands for file-writing operations
+    if tool_name == "Bash":
+        command = tool_input.get("command", "")
+        if is_bash_write_command(command):
+            return True, f"Blocked by dry-run mode. Would execute: {command[:100]}"
+
+    return False, None
+
+
+def main() -> None:
+    """Main hook execution."""
+    try:
+        # Read input from stdin
+        input_data: HookInput = json.load(sys.stdin)
+        tool_name = input_data.get("tool_name", "")
+        tool_input = input_data.get("tool_input", {})
+
+        # Determine if should block
+        should_block, message = should_block_tool(tool_name, tool_input)
+
+        # Return decision
+        output: HookOutput = {
+            "decision": "block" if should_block else "allow",
+            "message": message
+        }
+        print(json.dumps(output))
+
+    except Exception as e:
+        # Fail-open: if hook crashes, allow the operation
+        print(json.dumps({"decision": "allow", "message": None}))
+        print(f"Hook error: {e}", file=sys.stderr)
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

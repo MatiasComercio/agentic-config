@@ -113,6 +113,38 @@ sync_self_hosted_commands() {
   fi
 }
 
+# Sync all hook symlinks for self-hosted repo
+sync_self_hosted_hooks() {
+  local target="$1"
+
+  # Skip if target IS the repo root (prevents recursive symlinks)
+  if [[ "$(cd "$target" && pwd)" == "$REPO_ROOT" ]]; then
+    return 0
+  fi
+
+  local synced=0
+  local missing=()
+
+  echo "Self-hosted repo detected - syncing ALL hook symlinks..."
+
+  for hook_file in "$REPO_ROOT/core/hooks/pretooluse/"*.py; do
+    [[ ! -f "$hook_file" ]] && continue
+    local hook=$(basename "$hook_file")
+    local dest="$target/.claude/hooks/pretooluse/$hook"
+
+    if [[ ! -L "$dest" ]]; then
+      missing+=("$hook")
+      mkdir -p "$target/.claude/hooks/pretooluse"
+      local rel_target="../../../core/hooks/pretooluse/$hook"
+      (cd "$target/.claude/hooks/pretooluse" && ln -sf "$rel_target" "$hook")
+      echo "  ✓ $hook (created)"
+      ((synced++)) || true
+    fi
+  done
+
+  [[ $synced -eq 0 ]] && echo "  (all hooks already symlinked)"
+}
+
 # Skills: all directories in core/skills/
 discover_available_skills() {
   local skills=()
@@ -276,6 +308,7 @@ if is_self_hosted "$TARGET_PATH"; then
   # Clean up any invalid nested symlinks first
   cleanup_invalid_nested_symlinks "$TARGET_PATH"
   sync_self_hosted_commands "$TARGET_PATH"
+  sync_self_hosted_hooks "$TARGET_PATH"
 fi
 
 if [[ "$CURRENT_VERSION" == "$LATEST_VERSION" ]]; then
@@ -524,6 +557,26 @@ for skill in "${AVAILABLE_SKILLS[@]}"; do
   fi
 done
 [[ $SKILLS_INSTALLED -eq 0 ]] && echo "  (all skills already installed)"
+
+# Install all hooks from core (respect install_mode)
+echo "Installing hooks..."
+mkdir -p "$TARGET_PATH/.claude/hooks/pretooluse"
+HOOKS_INSTALLED=0
+for hook_file in "$REPO_ROOT/core/hooks/pretooluse/"*.py; do
+  [[ ! -f "$hook_file" ]] && continue
+  hook=$(basename "$hook_file")
+  if [[ ! -e "$TARGET_PATH/.claude/hooks/pretooluse/$hook" ]]; then
+    if [[ "$INSTALL_MODE" == "copy" ]]; then
+      cp "$hook_file" "$TARGET_PATH/.claude/hooks/pretooluse/$hook"
+    else
+      rel_target="../../../core/hooks/pretooluse/$hook"
+      (cd "$TARGET_PATH/.claude/hooks/pretooluse" && ln -sf "$rel_target" "$hook")
+    fi
+    echo "  ✓ $hook"
+    ((HOOKS_INSTALLED++)) || true
+  fi
+done
+[[ $HOOKS_INSTALLED -eq 0 ]] && echo "  (all hooks already installed)"
 
 # Clean up orphaned symlinks
 echo "Cleaning up orphaned symlinks..."
