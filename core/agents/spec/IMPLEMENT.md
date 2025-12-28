@@ -26,9 +26,9 @@ SPEC: $ARGUMENT
 6. IF an unexpected error/failure occurs, surface it to the user. If you cannot recover from it, stop and ask user feedback. DO NOT ignore the error/failure.
 7. SUMMARIZE result to user in output (max: 150 words).
 8. COMMIT implementation, tests, and spec (ONLY the files you changed):
-	1. Commit code changes + tests + spec file with task statuses
+	1. Commit code changes + tests + spec file with task statuses using message: `spec(NNN): IMPLEMENT - <title>`
 	2. Update spec with commit hash, placing it clearly at the end of the '# AI Section > ## Implement' section.
-	3. Commit spec file again with message: `spec(NNN): IMPLEMENT - <title>`
+	3. Commit spec file again with message: `spec(NNN): IMPLEMENT - <title> [hash]`
 
 ## Behavior
 
