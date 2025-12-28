@@ -4,6 +4,10 @@ All notable changes to agentic-config.
 
 ## [Unreleased]
 
+### Fixed
+
+- IMPLEMENT spec stage now enforces `spec(NNN): IMPLEMENT - <title>` format on ALL commits (was missing on first commit)
+
 ## [0.1.14] - 2025-12-26
 
 ### Added
