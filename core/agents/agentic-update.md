@@ -27,11 +27,11 @@ Parse `$ARGUMENTS` for optional flags:
 - Compare with `~/projects/agentic-config/VERSION`
 - Read `CHANGELOG.md` for what changed between versions
 
-### 1b. Same Version / Nightly Mode
-If version matches OR `nightly` argument provided:
-- Offer to **rebuild all symlinks** (useful when new commands/skills added)
+### 1b. Nightly Mode
+If `nightly` explicitly provided in `$ARGUMENTS`:
+- **Rebuild all symlinks** (useful when new commands/skills added, or for development)
 - Use AskUserQuestion:
-  - "Rebuild all symlinks?"
+  - "Version matches - rebuild all symlinks in nightly mode?"
   - Options: "Yes, rebuild" (Recommended), "No, skip"
 - If yes: proceed to symlink rebuild (skip template checks)
 - If no: exit with "Already up to date!"
@@ -179,12 +179,15 @@ ln -sf ../../core/agents agents
 
 # Commands - rebuild ALL from core
 for cmd in ../../core/commands/claude/*.md; do
+  [[ ! -f "$cmd" ]] && continue  # Skip if source missing
   name=$(basename "$cmd")
-  (cd .claude/commands && ln -sf "../../core/commands/claude/$name" "$name")
+  target="../../core/commands/claude/$name"
+  (cd .claude/commands && ln -sf "$target" "$name")
 done
 
 # Skills - rebuild ALL from core
 for skill in ../../core/skills/*; do
+  [[ ! -e "$skill" ]] && continue  # Skip if source missing
   name=$(basename "$skill")
   (cd .claude/skills && ln -sf "../../core/skills/$name" "$name")
 done

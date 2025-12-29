@@ -112,7 +112,11 @@ On command start:
 1. Check for existing `in_progress` state files in `outputs/orc/{YYYY}/{MM}/{DD}/*/workflow_state.yml`
 2. If found for `full-life-cycle-pr`: display session info and ask user to resume or start fresh
 3. On resume: load state, continue from `current_step`
-4. On start fresh: archive old state (rename with `.archived` suffix), initialize new session
+4. On start fresh: initialize new session (DO NOT archive old state)
+
+**IMPORTANT**: Parallel agents from `/orc`, `/spawn`, or `/po_spec` may still be writing to existing sessions.
+NEVER archive or modify in-progress sessions automatically. Sessions naturally become stale over time when
+agents complete. Let the filesystem manage old sessions.
 
 ### State Update Protocol (AI-Interpreted)
 

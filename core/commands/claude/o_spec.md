@@ -85,6 +85,12 @@ resume_instruction: "Resume from IMPLEMENT with: /o_spec resume"
 
 - On command start: check for existing `in_progress` state for `o_spec`
 - If found: display session info and ask user to resume or start fresh
+
+**IMPORTANT**: When user selects "start fresh", create new session directory WITHOUT archiving old state.
+Parallel agents from `/orc`, `/spawn`, or nested `/po_spec` may still be writing to existing sessions.
+NEVER archive or modify in-progress sessions automatically. Sessions naturally become stale over time when
+agents complete. Let the filesystem manage old sessions.
+
 - On resume: load state, continue from `current_stage`/`current_step`
 
 ## State Update Protocol (AI-Interpreted)

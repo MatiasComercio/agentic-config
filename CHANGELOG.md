@@ -16,16 +16,34 @@ All notable changes to agentic-config.
   - Session status file (outputs/session/status.yml) exempt from blocking
   - Fail-open principle: allows operations on errors to prevent blocking legitimate work
   - Installed automatically during setup, migrate, and update workflows
+- Source file validation in `/agentic update nightly` symlink rebuild
+  - Validates source files exist before creating symlinks
+  - Skips missing files with clear reporting to prevent broken symlinks
 
 ### Changed
 
 - Dry-run enforcement migrated from instruction-based to hook-based
   - Removed AGENTS.md dry-run verification section (replaced by pretooluse hook)
   - Hard enforcement at Claude Code tool level prevents accidental file modifications
+- `/agentic update` nightly mode now requires explicit `nightly` argument
+  - No longer auto-infers nightly mode based on version matching
+  - Clear semantics: `/agentic update nightly` for symlink rebuild
+- `/full-life-cycle-pr` and `/o_spec` session handling improved
+  - No longer archives in-progress sessions when starting fresh
+  - Prevents conflicts with parallel agents from `/orc`, `/spawn`, `/po_spec`
+  - Sessions naturally become stale over time without destructive cleanup
 
 ### Fixed
 
 - IMPLEMENT spec stage now enforces `spec(NNN): IMPLEMENT - <title>` format on ALL commits (was missing on first commit)
+- Hook execution in non-Python projects - added `--no-project` flag to all `uv run` hook commands
+  - Fixed in `.claude/settings.json`, `scripts/setup-config.sh`, `.claude/commands/init.md`, `scripts/update-config.sh`
+  - Prevents "project not found" errors when hooks run in directories without `pyproject.toml`
+- Hook path resolution when Claude changes working directory
+  - Hook command now uses absolute paths instead of relative paths
+  - `dry-run-guard.py` accepts project root as CLI argument
+  - Prevents "No such file or directory" errors when CWD differs from project root
+  - Updated in `setup-config.sh`, `update-config.sh`, `init.md`, and hook script
 
 ## [0.1.14] - 2025-12-26
 
