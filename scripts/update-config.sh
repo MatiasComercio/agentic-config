@@ -589,7 +589,7 @@ HOOK_CONFIG='{
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --script .claude/hooks/pretooluse/dry-run-guard.py"
+            "command": "uv run --no-project --script .claude/hooks/pretooluse/dry-run-guard.py"
           }
         ]
       }
