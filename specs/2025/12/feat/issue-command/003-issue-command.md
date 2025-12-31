@@ -990,6 +990,17 @@ git -C "$REPO_ROOT" commit -m "spec(003): IMPLEMENT - issue-command"
 
 ## Implement
 
+### TODO List
+
+- [x] Task 1: Create core/commands/claude/issue.md - Status: Done
+- [x] Task 2: Create tests/e2e/test_issue_command.sh - Status: Done
+- [x] Task 3: Run E2E Tests - Status: Done (26 PASS, 0 FAIL)
+- [x] Task 4: Commit Changes - Status: Done
+
+### Implementation Commit
+
+Commit: e4017c6
+
 ## Test Evidence & Outputs
 
 ## Updated Doc
