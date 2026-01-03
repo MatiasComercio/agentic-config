@@ -119,6 +119,10 @@ All notable changes to agentic-config.
   - `dry-run-guard.py` accepts project root as CLI argument
   - Prevents "No such file or directory" errors when CWD differs from project root
   - Updated in `setup-config.sh`, `update-config.sh`, `init.md`, and hook script
+- Hook command update detection in settings.json during setup/update
+  - Previously only checked for presence of "dry-run-guard" string
+  - Now compares full command content and updates when different from expected
+  - Ensures existing installations receive hook command updates (e.g., absolute path fix)
 
 ## [0.1.14] - 2025-12-26
 
