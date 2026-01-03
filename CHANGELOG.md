@@ -4,6 +4,18 @@ All notable changes to agentic-config.
 
 ## [Unreleased]
 
+### Added
+
+- `/video_query` command - Query video content using Gemini API for LLM-driven analysis
+- `/browser` command - Open browser for E2E testing via Playwright MCP
+- `/test_e2e` command - Execute E2E test definitions with Playwright
+- `/e2e_review` command - Visual spec implementation validation
+- `/prepare_app` command - Start development server for testing
+- `/e2e-template` command - Template for creating E2E test definitions
+- `core/scripts/video_query.py` - PEP 723 single-file video analysis script
+- `templates/mcp/playwright.json` - Playwright MCP configuration template
+- E2E testing documentation (`docs/playwright-mcp-setup.md`) and setup guide
+
 ## [0.1.15] - 2026-01-03
 
 ### Added
