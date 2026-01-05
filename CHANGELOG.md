@@ -4,6 +4,12 @@ All notable changes to agentic-config.
 
 ## [Unreleased]
 
+### Added
+
+- Conditional Documentation section in all AGENTS.md templates referencing `$AGENTIC_GLOBAL/docs/external-specs-storage.md`
+  - Guides users to external specs documentation when configuring spec storage
+  - Applies to all 7 project type templates (generic, python-*, rust, typescript, ts-bun)
+
 ## [0.1.15] - 2026-01-03
 
 ### Added
