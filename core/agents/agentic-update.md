@@ -42,8 +42,11 @@ If `nightly` explicitly provided in `$ARGUMENTS`:
 - Use AskUserQuestion:
   - "Version matches - reconcile config and rebuild symlinks in nightly mode?"
   - Options: "Yes, reconcile" (Recommended), "No, skip"
-- If yes: run `update-config.sh --nightly` (handles config reconciliation and symlink rebuild)
 - If no: exit with "Already up to date!"
+- If yes:
+  1. Run `update-config.sh --nightly` (handles config reconciliation and symlink rebuild)
+  2. **CRITICAL: IMMEDIATELY proceed to Section 3b (MCP) and Section 3c (External Specs) - feature prompts are MANDATORY for ALL update modes including nightly. DO NOT SKIP.**
+  3. Then proceed to Section 7 (Report Completion)
 
 ### 2. Impact Assessment
 
@@ -163,7 +166,9 @@ Based on analysis, show appropriate options:
 
 #### 3b. MCP Server Configuration (MANDATORY PROMPT)
 
-**IMMEDIATELY after user confirms update option, check and prompt for MCP:**
+**CRITICAL: This section is MANDATORY for ALL update modes (normal, full, nightly). You MUST execute this section. Failure to prompt for unconfigured features is a workflow violation.**
+
+**Check and prompt for MCP:**
 
 ```bash
 MCP_CONFIGURED=false
@@ -180,7 +185,9 @@ MCP_CONFIGURED=false
 
 #### 3c. External Specs Configuration (MANDATORY PROMPT)
 
-**IMMEDIATELY after MCP prompt, check and prompt for External Specs:**
+**CRITICAL: This section is MANDATORY for ALL update modes (normal, full, nightly). Execute IMMEDIATELY after Section 3b.**
+
+**Check and prompt for External Specs:**
 
 ```bash
 EXT_SPECS_CONFIGURED=false
