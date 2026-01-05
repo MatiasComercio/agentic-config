@@ -247,6 +247,42 @@ Report from script shows:
 - Test /spec command: `/spec RESEARCH <test_spec>`
 - Confirm no broken references
 
+### 7. MCP Server Check (Post-Update)
+
+After completing core update, check if MCP servers should be offered:
+
+**Detection:**
+```bash
+# Check for existing MCP configuration
+[[ -f ".mcp.json" ]] && MCP_CONFIGURED=true
+[[ -f ".gemini/settings.json" ]] && grep -q "mcpServers" ".gemini/settings.json" 2>/dev/null && MCP_CONFIGURED=true
+```
+
+**Prompt Logic:**
+- If MCP NOT configured AND update was successful:
+  - Use AskUserQuestion:
+    - **Question**: "Would you like to install MCP servers for browser automation and E2E testing?"
+    - **Options**:
+      - "Yes, install playwright" (Recommended) - Enables browser automation via MCP
+      - "No, skip" - Continue without MCP
+- If MCP already configured:
+  - Skip prompt (no action needed)
+
+**If user selects "Yes":**
+```bash
+# Pure bash - no external commands
+_agp=""
+[[ -f ~/.agents/.path ]] && _agp=$(<~/.agents/.path)
+AGENTIC_GLOBAL="${AGENTIC_CONFIG_PATH:-${_agp:-$HOME/.agents/agentic-config}}"
+unset _agp
+"$AGENTIC_GLOBAL/scripts/update-config.sh" --mcp playwright <target_path>
+```
+
+**Report MCP installation result:**
+- Show which tools were configured (Claude, Gemini, Codex, Antigravity)
+- Mention directories created (videos/, outputs/e2e/)
+- Note any post-install commands run (npx playwright install chromium)
+
 ## Template Diff Workflow
 
 When AGENTS.md template changed:
