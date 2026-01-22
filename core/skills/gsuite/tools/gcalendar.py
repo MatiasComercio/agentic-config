@@ -152,7 +152,8 @@ def get_event_type(event: dict) -> str:
 @app.command("list-events")
 def list_events(
     calendar_id: Annotated[str | None, typer.Option("--calendar", "-c", help="Calendar ID")] = None,
-    days: Annotated[int, typer.Option("--days", "-d", help="Days ahead to show", min=1)] = 7,
+    days: Annotated[int, typer.Option("--days", "-d", help="Days to show (from start date)", min=1)] = 7,
+    start: Annotated[str | None, typer.Option("--start", "-s", help="Start date (YYYY-MM-DD, default: today)")] = None,
     limit: Annotated[int, typer.Option("--limit", "-n", help="Max results")] = 20,
     with_attendees: Annotated[bool, typer.Option("--with-attendees", help="Only events with attendees")] = False,
     attendee: Annotated[str | None, typer.Option("--attendee", help="Filter by attendee email")] = None,
@@ -161,15 +162,21 @@ def list_events(
     account: Annotated[str | None, typer.Option("--account", "-a", help="Account email (default: active)")] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
 ) -> None:
-    """List upcoming events."""
+    """List events from a start date."""
     if calendar_id is None:
         calendar_id = get_default_calendar(account)
     try:
         service = get_calendar_service(account)
 
-        now = datetime.now(timezone.utc)
-        time_min = now.isoformat()
-        time_max = (now + timedelta(days=days)).isoformat()
+        if start:
+            start_dt = parse_datetime(start)
+            # Make timezone-aware at start of day
+            start_dt = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+            time_min = start_dt.replace(tzinfo=timezone.utc).isoformat()
+        else:
+            start_dt = datetime.now(timezone.utc)
+            time_min = start_dt.isoformat()
+        time_max = (start_dt.replace(tzinfo=timezone.utc) + timedelta(days=days)).isoformat()
 
         # When filtering, over-fetch then filter client-side
         type_filter = event_type != EventTypeFilter.all
