@@ -18,9 +18,12 @@ Thumbs.db
 .agentic-config.backup.*
 .agentic-config.copy-backup.*
 
+# Python
+__pycache__/
+*.pyc
+
 # Testing
 /test-projects/
-tests/__pycache__/
 # Installation tracking
 .installations.json
 
@@ -37,6 +40,9 @@ specs/
 # Local environment
 .env
 .agentic-config.conf.yml
+
+# User-side customizations (not tracked)
+customization/
 
 # External specs repository (cloned locally, tracked separately)
 .specs/
