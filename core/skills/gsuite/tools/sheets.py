@@ -7,6 +7,7 @@
 #   "google-auth-httplib2>=0.1.1",
 #   "typer>=0.9.0",
 #   "rich>=13.0.0",
+#   "pyyaml>=6.0",
 # ]
 # requires-python = ">=3.12"
 # ///

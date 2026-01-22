@@ -5,6 +5,7 @@
 #   "google-auth>=2.23.0",
 #   "google-auth-oauthlib>=1.1.0",
 #   "google-auth-httplib2>=0.1.1",
+#   "pyyaml>=6.0",
 #   "typer>=0.9.0",
 #   "rich>=13.0.0",
 # ]
