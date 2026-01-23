@@ -408,6 +408,7 @@ def draft(
     to: Annotated[str, typer.Argument(help="Recipient email")],
     subject: Annotated[str, typer.Argument(help="Email subject")],
     body: Annotated[str, typer.Argument(help="Email body")],
+    html: Annotated[bool, typer.Option("--html", help="Send as HTML (enables bold, links, etc.)")] = False,
     extra: Annotated[str | None, typer.Option("--extra", help="JSON: cc, bcc arrays or additional headers")] = None,
     account: Annotated[str | None, typer.Option("--account", "-a", help="Account email (default: active)")] = None,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
@@ -448,7 +449,9 @@ def draft(
     try:
         service = get_gmail_service(account)
 
-        message = MIMEText(body)
+        # Create message with appropriate content type
+        content_type = "html" if html else "plain"
+        message = MIMEText(body, content_type)
         message["to"] = to
         message["subject"] = subject
         if cc_list:
