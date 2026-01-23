@@ -13,6 +13,32 @@ Project overrides for agentic-config repository.
   - Use placeholder IDs: `abc123`, `<file_id>`, `<email>`
 - CRITICAL: NEVER add `outputs/` content to git - this directory is gitignored for a reason
 
+## PII Compliance Enforcement
+
+**Automated pre-commit hook verifies PII compliance on every commit.**
+
+### What Gets Blocked
+- Real email addresses (except @example.com, @example.org)
+- Real phone numbers, physical addresses
+- Real names tied to identifiable data
+- Real company names (not Example Corp, Acme Inc)
+- Monetary values (salaries, specific prices, budgets)
+- API keys, tokens, credentials
+
+### What Is Allowed
+- Anonymized examples: john@example.com, Jane Doe, Example Corp
+- Generic companies: Acme Inc, Test Company
+- Placeholder syntax: `<email>`, `<id>`, `abc123`, `$X`
+- System emails: noreply@, @anthropic.com (Co-Authored-By)
+
+### Verification
+After every commit, confirm hook output shows:
+```
+PII_AUDIT: PASS
+```
+
+If blocked, fix the PII issue and re-commit.
+
 ## Installation Flexibility
 
 CRITICAL - agentic-config MUST be agnostic and work seamlessly in all scenarios:
