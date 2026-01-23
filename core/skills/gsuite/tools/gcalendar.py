@@ -41,6 +41,13 @@ class EventTypeFilter(str, Enum):
     block = "block"      # No other attendees (focus, OOO, personal)
 
 
+class ResponseStatus(str, Enum):
+    """RSVP response status values."""
+    accepted = "accepted"
+    declined = "declined"
+    tentative = "tentative"
+
+
 def get_local_timezone() -> str:
     """Get local IANA timezone name (e.g., 'America/New_York')."""
     import os
@@ -571,6 +578,86 @@ def delete(
             }))
         else:
             console.print(f"[green]Deleted:[/green] {event.get('summary')}")
+
+    except HttpError as e:
+        console.print(f"[red]API Error:[/red] {e.reason}")
+        raise typer.Exit(1)
+
+
+@app.command()
+def rsvp(
+    event_id: Annotated[str, typer.Argument(help="Event ID")],
+    response: Annotated[ResponseStatus, typer.Argument(help="Response: accepted, declined, tentative")],
+    calendar_id: Annotated[str | None, typer.Option("--calendar", "-c", help="Calendar ID")] = None,
+    account: Annotated[str | None, typer.Option("--account", "-a", help="Account email (default: active)")] = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+) -> None:
+    """Set RSVP response for an event (accept, decline, tentative)."""
+    if calendar_id is None:
+        calendar_id = get_default_calendar(account)
+    try:
+        service = get_calendar_service(account)
+
+        # Get event details
+        event = service.events().get(
+            calendarId=calendar_id,
+            eventId=event_id,
+        ).execute()
+
+        # Find self in attendees
+        attendees = event.get("attendees", [])
+        self_attendee = None
+        self_index = -1
+        for i, attendee in enumerate(attendees):
+            if attendee.get("self"):
+                self_attendee = attendee
+                self_index = i
+                break
+
+        # Edge case: organizer without attendee entry
+        if self_attendee is None:
+            # Check if we're the organizer
+            organizer = event.get("organizer", {})
+            if organizer.get("self"):
+                # Add self as attendee with response
+                active = get_active_account()
+                self_attendee = {
+                    "email": active or organizer.get("email", ""),
+                    "self": True,
+                    "responseStatus": response.value,
+                }
+                attendees.append(self_attendee)
+                self_index = len(attendees) - 1
+            else:
+                console.print("[red]Error:[/red] You are not an attendee of this event")
+                raise typer.Exit(1)
+
+        current_status = self_attendee.get("responseStatus", "needsAction")
+        details = f"Event: {event.get('summary', '(no title)')}\nCurrent: {current_status}\nNew: {response.value}"
+        if not confirm_action("Update RSVP", details, "calendar", skip_confirmation=yes):
+            console.print("[yellow]Cancelled.[/yellow]")
+            raise typer.Exit(0)
+
+        # Update response status
+        attendees[self_index]["responseStatus"] = response.value
+        event["attendees"] = attendees
+
+        updated = service.events().update(
+            calendarId=calendar_id,
+            eventId=event_id,
+            body=event,
+        ).execute()
+
+        if json_output:
+            stdout_console.print_json(json.dumps({
+                "id": updated.get("id"),
+                "summary": updated.get("summary"),
+                "responseStatus": response.value,
+                "previous": current_status,
+            }))
+        else:
+            console.print(f"[green]RSVP updated:[/green] {event.get('summary')} → {response.value}")
 
     except HttpError as e:
         console.print(f"[red]API Error:[/red] {e.reason}")

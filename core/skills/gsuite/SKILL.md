@@ -94,6 +94,7 @@ All tools are PEP 723 uv scripts in `core/skills/gsuite/tools/`:
 |------|-------------|---------|
 | `setup.py` | Setup automation | `uv run setup.py init` |
 | `auth.py` | Account management | `uv run auth.py status` |
+| `gdate.py` | Date/time parsing | `uv run gdate.py parse "mon 3pm" --json` |
 | `sheets.py` | Sheets operations | `uv run sheets.py read <id> "A1:D10"` |
 | `docs.py` | Docs operations | `uv run docs.py read <id>` |
 | `slides.py` | Slides operations | `uv run slides.py read <id>` |
@@ -286,6 +287,26 @@ uv run core/skills/gsuite/tools/auth.py remove <email>   # Remove account
 
 For setup flows, **read `cookbook/auth.md`**.
 
+### Date/Time Parsing
+
+Parse relative date/time expressions to ISO format for calendar operations:
+
+```bash
+uv run core/skills/gsuite/tools/gdate.py parse "mon 3pm" --json           # Next Monday at 3pm
+uv run core/skills/gsuite/tools/gdate.py parse "tomorrow 2pm" --duration "1h" --json
+uv run core/skills/gsuite/tools/gdate.py parse "next friday 10am" --json
+uv run core/skills/gsuite/tools/gdate.py parse "in 3 days" --json
+uv run core/skills/gsuite/tools/gdate.py now --json                       # Current time info
+```
+
+Integration with calendar:
+```bash
+times=$(uv run gdate.py parse "mon 3pm" --duration "1h" --json)
+start=$(echo "$times" | jq -r '.start')
+end=$(echo "$times" | jq -r '.end')
+uv run gcalendar.py create "Meeting" "$start" "$end" --yes
+```
+
 ### Sheets Operations
 
 ```bash
@@ -355,6 +376,8 @@ uv run core/skills/gsuite/tools/gcalendar.py list-events --type block    # Only 
 uv run core/skills/gsuite/tools/gcalendar.py create "Meeting" "2024-01-15T10:00" "2024-01-15T11:00" [--yes]
 uv run core/skills/gsuite/tools/gcalendar.py update <event_id> --title "New Title"
 uv run core/skills/gsuite/tools/gcalendar.py delete <event_id>
+uv run core/skills/gsuite/tools/gcalendar.py rsvp <event_id> accepted --yes
+uv run core/skills/gsuite/tools/gcalendar.py rsvp <event_id> declined --yes
 uv run core/skills/gsuite/tools/gcalendar.py calendars
 ```
 
