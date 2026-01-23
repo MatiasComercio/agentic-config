@@ -196,7 +196,7 @@ $AGENTIC_GLOBAL/customization/gsuite/
 # Account Preferences
 
 ## Labels
-- personal = user@gmail.com
+- personal = user@example.com
 - work = user@corporate.com
 
 ## Defaults

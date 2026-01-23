@@ -199,7 +199,7 @@ When request explicitly involves multiple accounts (e.g., "check both my work an
 Example:
 ```bash
 # User: "check next week schedule for my personal & work calendars"
-uv run gcalendar.py list-events --days 7 --account personal@gmail.com --json
+uv run gcalendar.py list-events --days 7 --account personal@example.com --json
 uv run gcalendar.py list-events --days 7 --account work@company.com --json
 ```
 
