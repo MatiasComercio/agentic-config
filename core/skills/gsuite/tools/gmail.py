@@ -530,5 +530,42 @@ def list_labels(
         raise typer.Exit(1)
 
 
+@app.command()
+def delete(
+    message_id: Annotated[str, typer.Argument(help="Message or draft ID to delete")],
+    draft: Annotated[bool, typer.Option("--draft", "-d", help="Delete a draft instead of a message")] = False,
+    account: Annotated[str | None, typer.Option("--account", "-a", help="Account email (default: active)")] = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+) -> None:
+    """Delete a message or draft."""
+    item_type = "draft" if draft else "message"
+
+    if not confirm_action(f"Delete {item_type}", f"ID: {message_id}", "gmail", skip_confirmation=yes):
+        console.print("[yellow]Cancelled.[/yellow]")
+        raise typer.Exit(0)
+
+    try:
+        service = get_gmail_service(account)
+
+        if draft:
+            service.users().drafts().delete(userId="me", id=message_id).execute()
+        else:
+            service.users().messages().delete(userId="me", id=message_id).execute()
+
+        if json_output:
+            stdout_console.print_json(json.dumps({
+                "deleted": True,
+                "id": message_id,
+                "type": item_type,
+            }))
+        else:
+            console.print(f"[green]Deleted {item_type}:[/green] {message_id}")
+
+    except HttpError as e:
+        console.print(f"[red]API Error:[/red] {e.reason}")
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()
