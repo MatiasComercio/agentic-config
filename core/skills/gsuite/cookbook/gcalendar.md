@@ -2,6 +2,28 @@
 
 Calendar-specific rules for meeting search, timezone handling, and event creation.
 
+## Event Date Fields
+
+Events have multiple date fields:
+
+| Field | Description | Format |
+|-------|-------------|--------|
+| `created` | When event was scheduled/created | ISO 8601 (`2025-09-26T18:58:56.000Z`) |
+| `updated` | Last modification time | ISO 8601 |
+| `start.dateTime` | Event start (timed events) | ISO 8601 with offset (`2026-02-05T16:30:00-03:00`) |
+| `start.date` | Event start (all-day events) | Date only (`2026-02-05`) |
+| `end.dateTime` / `end.date` | Event end | Same as start |
+
+### Extract Scheduled Date
+
+```bash
+# When was event created/scheduled
+uv run gcalendar.py list-events --days 30 --json | jq '.events[] | {summary, created, start: .start.dateTime}'
+
+# Find event by name and get creation date
+uv run gcalendar.py list-events --days 30 --json | jq '.events[] | select(.summary | test("keyword"; "i")) | {summary, scheduled: .created, occurs: .start.dateTime}'
+```
+
 ## Relative Date Parsing
 
 Use `gdate.py` to parse natural language dates before creating events:

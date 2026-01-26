@@ -139,7 +139,17 @@ $PWD/customization/gsuite/...  # This is for DEVELOPMENT, not runtime
 
 ## Workflow
 
-### 0. Load Preferences (Convention-Based)
+### 0. Resolve Date Context (MANDATORY)
+
+Before ANY operation, get current date/time with timezone:
+
+```bash
+date "+%Y-%m-%dT%H:%M:%S %Z"
+```
+
+Use this as baseline for ALL relative date references ("today", "next week", "upcoming", etc.). NEVER hardcode or assume years.
+
+### 0.1. Load Preferences (Convention-Based)
 
 **Convention**: `<tool>.py` -> `<tool>.md`
 
@@ -166,7 +176,7 @@ PREFS="$AGENTIC_GLOBAL/customization/gsuite"
 
 Apply loaded preferences to current operation parameters.
 
-### 0.5. Resolve Account (MANDATORY)
+### 0.2. Resolve Account (MANDATORY)
 
 When account is ambiguous, confirm with user before proceeding.
 
