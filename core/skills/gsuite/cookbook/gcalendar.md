@@ -68,14 +68,17 @@ When user asks for someone else's calendar events (not shared meetings WITH them
 ### Correct Usage
 
 ```bash
-# Query another user's calendar
+# Query another user's calendar (next 7 days, future only)
 uv run gcalendar.py list-events --calendar user@example.com --days 7 --json
 
-# Today's events for another user
-uv run gcalendar.py list-events --calendar user@example.com --days 1 --json
+# Today's FULL schedule for another user (including past events)
+uv run gcalendar.py list-events --calendar user@example.com --start $(date +%Y-%m-%d) --days 1 --limit 50 --json
+
+# Specific date's full schedule
+uv run gcalendar.py list-events --calendar user@example.com --start 2026-01-26 --days 1 --limit 50 --json
 
 # With account specification
-uv run gcalendar.py list-events --calendar user@example.com --days 7 --account myaccount@example.com --json
+uv run gcalendar.py list-events --calendar user@example.com --start $(date +%Y-%m-%d) --days 1 --account myaccount@example.com --json
 ```
 
 ### Key Distinction
@@ -89,41 +92,55 @@ uv run gcalendar.py list-events --calendar user@example.com --days 7 --account m
 
 ## Date Range Parameters (--start / --end)
 
+### Critical: Past Events Are Excluded by Default
+
+**`--days N` without `--start` only returns FUTURE events from NOW.**
+
+To get ALL events for a specific day (including past events), you MUST use:
+```bash
+--start YYYY-MM-DD --days 1
+```
+
 ### Working Combinations
 
 | Parameters | Result |
 |------------|--------|
-| `--days N` | Next N days from now |
-| `--start YYYY-MM-DD --days N` | N days starting from date |
-| `--start YYYY-MM-DD --end YYYY-MM-DD` | Specific date range (dates only, no time) |
+| `--days N` | Next N days from NOW (excludes past events today) |
+| `--start YYYY-MM-DD --days N` | ALL events for N days starting from midnight of date |
 
 ### Critical Rules
 
-1. **Use dates only** for --start/--end (not datetime with time component)
-2. **--days is more reliable** than --start/--end for simple queries
-3. **For today's events**: Use `--days 1` then filter by date in post-processing
+1. **For a specific date's full schedule**: ALWAYS use `--start YYYY-MM-DD --days 1`
+2. **Use dates only** for --start (not datetime with time component)
+3. **NEVER use `--days 1` alone** for "today's events" - it misses past events
 
 ### Examples
 
 ```bash
-# Next 7 days (recommended)
-uv run gcalendar.py list-events --days 7 --json
+# CORRECT: Today's FULL schedule (including past events)
+uv run gcalendar.py list-events --start $(date +%Y-%m-%d) --days 1 --json
 
-# Specific date range (dates only)
-uv run gcalendar.py list-events --start 2026-01-01 --end 2026-01-31 --json
+# CORRECT: Someone else's full day
+uv run gcalendar.py list-events --calendar user@example.com --start 2026-01-26 --days 1 --json
+
+# WRONG: Misses events that already happened today!
+uv run gcalendar.py list-events --days 1 --json
+
+# Next 7 days from now (future only - this is fine for forward-looking queries)
+uv run gcalendar.py list-events --days 7 --json
 
 # Historical analysis (90 days from Nov 1)
 uv run gcalendar.py list-events --start 2025-11-01 --days 90 --json
 ```
 
-### Filtering Today's Events
+### Today's Events Pattern
 
-When user asks for "today's events", use --days 1 and filter:
+When user asks for "today's events" or "today's schedule":
 
 ```bash
+# Get ALL events for today (past + future)
 today=$(date +%Y-%m-%d)
-uv run gcalendar.py list-events --days 1 --json | \
-  jq --arg today "$today" '[.events[] | select((.start.dateTime // .start.date) | startswith($today))]'
+uv run gcalendar.py list-events --start "$today" --days 1 --limit 50 --json
 ```
 
 ## Meeting Search Semantics
