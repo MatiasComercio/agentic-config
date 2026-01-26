@@ -57,6 +57,75 @@ end=$(echo "$times" | jq -r '.end')
 uv run gcalendar.py create "Meeting" "$start" "$end" --yes
 ```
 
+## Querying Other Users' Calendars
+
+When user asks for someone else's calendar events (not shared meetings WITH them):
+
+### Requirements
+- Target user must have shared their calendar with you (read access)
+- Use `--calendar <email>` flag to query their calendar directly
+
+### Correct Usage
+
+```bash
+# Query another user's calendar
+uv run gcalendar.py list-events --calendar user@example.com --days 7 --json
+
+# Today's events for another user
+uv run gcalendar.py list-events --calendar user@example.com --days 1 --json
+
+# With account specification
+uv run gcalendar.py list-events --calendar user@example.com --days 7 --account myaccount@example.com --json
+```
+
+### Key Distinction
+
+| User Request | Correct Approach |
+|--------------|------------------|
+| "What's on John's calendar today?" | `--calendar john@example.com` (query HIS calendar) |
+| "My meetings with John" | `--attendee john@example.com` (query YOUR calendar, filter by attendee) |
+
+**NEVER** search for "shared meetings" when user asks for someone's calendar - query their calendar directly.
+
+## Date Range Parameters (--start / --end)
+
+### Working Combinations
+
+| Parameters | Result |
+|------------|--------|
+| `--days N` | Next N days from now |
+| `--start YYYY-MM-DD --days N` | N days starting from date |
+| `--start YYYY-MM-DD --end YYYY-MM-DD` | Specific date range (dates only, no time) |
+
+### Critical Rules
+
+1. **Use dates only** for --start/--end (not datetime with time component)
+2. **--days is more reliable** than --start/--end for simple queries
+3. **For today's events**: Use `--days 1` then filter by date in post-processing
+
+### Examples
+
+```bash
+# Next 7 days (recommended)
+uv run gcalendar.py list-events --days 7 --json
+
+# Specific date range (dates only)
+uv run gcalendar.py list-events --start 2026-01-01 --end 2026-01-31 --json
+
+# Historical analysis (90 days from Nov 1)
+uv run gcalendar.py list-events --start 2025-11-01 --days 90 --json
+```
+
+### Filtering Today's Events
+
+When user asks for "today's events", use --days 1 and filter:
+
+```bash
+today=$(date +%Y-%m-%d)
+uv run gcalendar.py list-events --days 1 --json | \
+  jq --arg today "$today" '[.events[] | select((.start.dateTime // .start.date) | startswith($today))]'
+```
+
 ## Meeting Search Semantics
 
 **CRITICAL INTERPRETATION RULES** (apply BEFORE searching):
