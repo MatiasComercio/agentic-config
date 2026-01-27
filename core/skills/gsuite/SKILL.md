@@ -53,17 +53,19 @@ For delegation patterns and examples, see `cookbook/orchestration.md`.
 - Check auth: `uv run auth.py status --json`
 - Resolve account (ask if ambiguous, remember for session)
 
-### 2. Load Preferences
+### 2. Load Preferences (BLOCKING)
+**STOP. Check customization BEFORE any tool execution or API search.**
 Check `$AGENTIC_GLOBAL/customization/gsuite/` for:
 - `index.md` (always)
 - `<tool>.md` (if exists)
 - `people.md` (if name mentioned)
 
-### 3. Resolve People
-If name (not email) mentioned -> read `cookbook/people.md`, then:
-1. Check customization `people.md` first
-2. Fall back to People API
-3. Handle ambiguous matches
+### 3. Resolve People (BLOCKING)
+**NEVER search People API before checking customization.**
+If name (not email) mentioned:
+1. **FIRST**: Check `$AGENTIC_GLOBAL/customization/gsuite/people.md`
+2. **ONLY IF NOT FOUND**: Fall back to People API via `cookbook/people.md`
+3. Handle ambiguous matches via AskUserQuestion
 
 ### 4. Read Cookbook (BLOCKING)
 **STOP. Read cookbook before executing any tool.**
@@ -74,6 +76,12 @@ Run tool, report results (status, data, errors).
 
 ### 6. Learn Preferences (Post-Execution)
 On user correction -> read `cookbook/preferences.md` for storage flow.
+
+## Anti-Patterns (NEVER DO)
+
+- Searching People API before reading `people.md` customization
+- Executing tools before reading their cookbook
+- Skipping `index.md` preferences check
 
 ## Configuration
 
