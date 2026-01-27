@@ -17,7 +17,7 @@ Google Suite integration for Claude Code with multi-account support (enterprise 
 ## Capabilities
 
 - Sheets: Read/write cells, create spreadsheets, append rows, manage sheets (list/add/rename/delete tabs)
-- Docs: Read/write documents, create docs, export to PDF/DOCX
+- Docs: Read/write documents, create docs, export to PDF/DOCX, manage tabs (list/create/rename/delete)
 - Slides: Read presentations, create slides, add content
 - Drive: List files, share, manage permissions, create folders
 - Gmail: Read/send/draft messages, search, manage labels
@@ -40,9 +40,9 @@ For delegation patterns and examples, see `cookbook/orchestration.md`.
 
 ## Conventions
 
-**Tools:** All PEP 723 uv scripts in `core/skills/gsuite/tools/`. All support `--help` and `--account/-a <email>`.
+**Tools:** All PEP 723 uv scripts in `core/skills/gsuite/tools/`. All support `--help` and `--account/-a <email>`. Verify exact tool names first (`ls tools/`) - naming is inconsistent (e.g., `gcalendar` vs `docs`).
 
-**Cookbook:** `<tool>.py` -> `cookbook/<tool>.md` (MANDATORY read before executing)
+**Cookbook:** `<tool>.py` -> `cookbook/<tool>.md` (MANDATORY read before executing). If cookbook missing, check `<tool>.py --help` directly.
 
 **Customization:** `<tool>.py` -> `$AGENTIC_GLOBAL/customization/gsuite/<tool>.md`
 
@@ -69,7 +69,9 @@ If name (not email) mentioned:
 
 ### 4. Read Cookbook (BLOCKING)
 **STOP. Read cookbook before executing any tool.**
-Convention: `<tool>.py` -> `cookbook/<tool>.md`
+1. Verify exact tool name: `ls tools/` (e.g., `docs.py` not `gdocs.py`)
+2. Check `cookbook/<tool>.md` (exact match)
+3. If no cookbook: `<tool>.py --help`
 
 ### 5. Execute & Report
 Run tool, report results (status, data, errors).
@@ -79,6 +81,7 @@ On user correction -> read `cookbook/preferences.md` for storage flow.
 
 ## Anti-Patterns (NEVER DO)
 
+- Assuming tool names without verifying (`ls tools/` first)
 - Searching People API before reading `people.md` customization
 - Executing tools before reading their cookbook
 - Skipping `index.md` preferences check
