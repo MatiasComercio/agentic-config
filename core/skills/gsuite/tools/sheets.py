@@ -29,7 +29,7 @@ from rich.table import Table
 SCRIPT_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPT_DIR))
 from auth import get_credentials  # noqa: E402
-from utils import merge_extra  # noqa: E402
+from utils import confirm_action, merge_extra  # noqa: E402
 
 app = typer.Typer(help="Google Sheets CLI operations.")
 console = Console(stderr=True)
@@ -238,6 +238,239 @@ def create(
             console.print(f"[green]Created:[/green] {title}")
             console.print(f"ID: {spreadsheet_id}")
             console.print(f"URL: {url}")
+
+    except HttpError as e:
+        console.print(f"[red]API Error:[/red] {e.reason}")
+        raise typer.Exit(1)
+
+
+@app.command("list-sheets")
+def list_sheets(
+    spreadsheet_id: Annotated[str, typer.Argument(help="Spreadsheet ID")],
+    account: Annotated[str | None, typer.Option("--account", "-a", help="Account email (default: active)")] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+) -> None:
+    """List all sheets (tabs) in a spreadsheet."""
+    try:
+        service = get_sheets_service(account)
+        result = service.spreadsheets().get(
+            spreadsheetId=spreadsheet_id,
+            fields="sheets.properties",
+        ).execute()
+
+        sheets = result.get("sheets", [])
+
+        if json_output:
+            sheets_data = []
+            for sheet in sheets:
+                props = sheet.get("properties", {})
+                sheets_data.append({
+                    "sheet_id": props.get("sheetId"),
+                    "title": props.get("title"),
+                    "index": props.get("index"),
+                    "rows": props.get("gridProperties", {}).get("rowCount"),
+                    "cols": props.get("gridProperties", {}).get("columnCount"),
+                })
+            stdout_console.print_json(json.dumps({
+                "spreadsheet_id": spreadsheet_id,
+                "sheets": sheets_data,
+            }))
+            return
+
+        if not sheets:
+            console.print("[yellow]No sheets found.[/yellow]")
+            return
+
+        table = Table(title=f"Sheets in {spreadsheet_id}")
+        table.add_column("Index", style="dim")
+        table.add_column("Title")
+        table.add_column("Sheet ID")
+        table.add_column("Size")
+
+        for sheet in sheets:
+            props = sheet.get("properties", {})
+            grid = props.get("gridProperties", {})
+            rows = grid.get("rowCount", 0)
+            cols = grid.get("columnCount", 0)
+            table.add_row(
+                str(props.get("index", "")),
+                props.get("title", ""),
+                str(props.get("sheetId", "")),
+                f"{rows} x {cols}",
+            )
+
+        console.print(table)
+
+    except HttpError as e:
+        console.print(f"[red]API Error:[/red] {e.reason}")
+        raise typer.Exit(1)
+
+
+@app.command("add-sheet")
+def add_sheet(
+    spreadsheet_id: Annotated[str, typer.Argument(help="Spreadsheet ID")],
+    title: Annotated[str, typer.Argument(help="New sheet title")],
+    index: Annotated[int | None, typer.Option("--index", "-i", help="Position index for new sheet")] = None,
+    extra: Annotated[str | None, typer.Option("--extra", help="JSON: tabColor, gridProperties")] = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+    account: Annotated[str | None, typer.Option("--account", "-a", help="Account email (default: active)")] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+) -> None:
+    """Add a new sheet (tab) to a spreadsheet."""
+    try:
+        # Confirmation
+        details = f"Title: {title}"
+        if index is not None:
+            details += f"\nIndex: {index}"
+        if not confirm_action("Add sheet", details, "sheets", skip_confirmation=yes):
+            console.print("[yellow]Aborted[/yellow]")
+            raise typer.Exit(0)
+
+        # Build sheet properties
+        sheet_props: dict = {"title": title}
+        if index is not None:
+            sheet_props["index"] = index
+
+        # Merge --extra into sheet properties
+        try:
+            sheet_props, api_params = merge_extra(sheet_props, extra)
+        except ValueError as e:
+            console.print(f"[red]Error:[/red] {e}")
+            raise typer.Exit(1)
+
+        request = {"addSheet": {"properties": sheet_props}}
+
+        service = get_sheets_service(account)
+        result = service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": [request]},
+            **api_params,
+        ).execute()
+
+        # Extract new sheet info from response
+        replies = result.get("replies", [{}])
+        new_sheet = replies[0].get("addSheet", {}).get("properties", {})
+        sheet_id = new_sheet.get("sheetId")
+        new_title = new_sheet.get("title", title)
+        new_index = new_sheet.get("index")
+
+        if json_output:
+            stdout_console.print_json(json.dumps({
+                "spreadsheet_id": spreadsheet_id,
+                "sheet_id": sheet_id,
+                "title": new_title,
+                "index": new_index,
+            }))
+        else:
+            console.print(f"[green]Created sheet:[/green] {new_title}")
+            console.print(f"Sheet ID: {sheet_id}")
+
+    except HttpError as e:
+        console.print(f"[red]API Error:[/red] {e.reason}")
+        raise typer.Exit(1)
+
+
+@app.command("rename-sheet")
+def rename_sheet(
+    spreadsheet_id: Annotated[str, typer.Argument(help="Spreadsheet ID")],
+    sheet_id: Annotated[int, typer.Argument(help="Sheet ID (numeric)")],
+    new_title: Annotated[str, typer.Argument(help="New sheet title")],
+    extra: Annotated[str | None, typer.Option("--extra", help="JSON: additional properties (tabColor)")] = None,
+    account: Annotated[str | None, typer.Option("--account", "-a", help="Account email (default: active)")] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+) -> None:
+    """Rename a sheet (tab) in a spreadsheet."""
+    try:
+        # Build properties with title
+        props: dict = {"sheetId": sheet_id, "title": new_title}
+        fields = ["title"]
+
+        # Merge --extra
+        try:
+            props, api_params = merge_extra(props, extra)
+        except ValueError as e:
+            console.print(f"[red]Error:[/red] {e}")
+            raise typer.Exit(1)
+
+        # Add extra fields to update mask
+        if "tabColor" in props or "tabColorStyle" in props:
+            fields.append("tabColorStyle")
+
+        request = {
+            "updateSheetProperties": {
+                "properties": props,
+                "fields": ",".join(fields),
+            }
+        }
+
+        service = get_sheets_service(account)
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": [request]},
+            **api_params,
+        ).execute()
+
+        if json_output:
+            stdout_console.print_json(json.dumps({
+                "spreadsheet_id": spreadsheet_id,
+                "sheet_id": sheet_id,
+                "title": new_title,
+            }))
+        else:
+            console.print(f"[green]Renamed sheet {sheet_id} to:[/green] {new_title}")
+
+    except HttpError as e:
+        console.print(f"[red]API Error:[/red] {e.reason}")
+        raise typer.Exit(1)
+
+
+@app.command("delete-sheet")
+def delete_sheet(
+    spreadsheet_id: Annotated[str, typer.Argument(help="Spreadsheet ID")],
+    sheet_id: Annotated[int, typer.Argument(help="Sheet ID (numeric)")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+    account: Annotated[str | None, typer.Option("--account", "-a", help="Account email (default: active)")] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+) -> None:
+    """Delete a sheet (tab) from a spreadsheet."""
+    try:
+        service = get_sheets_service(account)
+
+        # Fetch sheet title for confirmation message
+        sheet_title = f"Sheet {sheet_id}"
+        try:
+            meta = service.spreadsheets().get(
+                spreadsheetId=spreadsheet_id,
+                fields="sheets.properties",
+            ).execute()
+            for s in meta.get("sheets", []):
+                if s.get("properties", {}).get("sheetId") == sheet_id:
+                    sheet_title = s["properties"].get("title", sheet_title)
+                    break
+        except HttpError:
+            pass  # Use default title if lookup fails
+
+        # Confirmation
+        details = f"Sheet: {sheet_title}\nSheet ID: {sheet_id}"
+        if not confirm_action("Delete sheet", details, "sheets", skip_confirmation=yes):
+            console.print("[yellow]Aborted[/yellow]")
+            raise typer.Exit(0)
+
+        request = {"deleteSheet": {"sheetId": sheet_id}}
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": [request]},
+        ).execute()
+
+        if json_output:
+            stdout_console.print_json(json.dumps({
+                "spreadsheet_id": spreadsheet_id,
+                "sheet_id": sheet_id,
+                "title": sheet_title,
+                "deleted": True,
+            }))
+        else:
+            console.print(f"[green]Deleted sheet:[/green] {sheet_title}")
 
     except HttpError as e:
         console.print(f"[red]API Error:[/red] {e.reason}")

@@ -16,7 +16,7 @@ Google Suite integration for Claude Code with multi-account support (enterprise 
 
 ## Capabilities
 
-- Sheets: Read/write cells, create spreadsheets, append rows, format cells
+- Sheets: Read/write cells, create spreadsheets, append rows, manage sheets (list/add/rename/delete tabs)
 - Docs: Read/write documents, create docs, export to PDF/DOCX
 - Slides: Read presentations, create slides, add content
 - Drive: List files, share, manage permissions, create folders
