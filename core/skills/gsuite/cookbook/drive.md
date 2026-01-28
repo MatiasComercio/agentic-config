@@ -27,3 +27,14 @@ uv run gmail.py search "from:drive-shares-dm-noreply@google.com newer_than:1d" -
 - `newer_than:1d` - today
 - `newer_than:7d` - last week
 - `after:2026/01/20` - after specific date
+
+## Organization-Wide Sharing
+
+```bash
+uv run drive.py share <file_id> _ --role reader --no-notify \
+  --extra '{"type": "domain", "domain": "example.com", "emailAddress": null}' --yes
+```
+
+- `_` placeholder for required email arg (ignored when type=domain)
+- `--no-notify` required for domain type
+- `emailAddress: null` removes hardcoded user field
