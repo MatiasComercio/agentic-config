@@ -691,5 +691,77 @@ def copy(
         raise typer.Exit(1)
 
 
+@app.command()
+def upload(
+    file_path: Annotated[Path, typer.Argument(help="Local file path to upload")],
+    name: Annotated[str | None, typer.Option("--name", "-n", help="File name in Drive (default: local filename)")] = None,
+    folder_id: Annotated[str | None, typer.Option("--folder", "-f", help="Destination folder ID")] = None,
+    mime_type: Annotated[str | None, typer.Option("--mime-type", "-m", help="MIME type (auto-detected if omitted)")] = None,
+    account: Annotated[str | None, typer.Option("--account", "-a", help="Account email (default: active)")] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+) -> None:
+    """Upload a local file to Google Drive (always private).
+
+    Files are uploaded with no sharing permissions beyond the owner.
+    To share after upload, use the 'share' command explicitly.
+    """
+    from googleapiclient.http import MediaFileUpload
+    import mimetypes
+
+    if not file_path.exists():
+        console.print(f"[red]Error:[/red] File not found: {file_path}")
+        raise typer.Exit(1)
+
+    if not file_path.is_file():
+        console.print(f"[red]Error:[/red] Not a file: {file_path}")
+        raise typer.Exit(1)
+
+    # Determine file name
+    upload_name = name or file_path.name
+
+    # Auto-detect MIME type if not provided
+    if not mime_type:
+        detected, _ = mimetypes.guess_type(str(file_path))
+        mime_type = detected or "application/octet-stream"
+
+    try:
+        service = get_drive_service(account)
+
+        # Build file metadata
+        metadata: dict[str, str | list[str]] = {"name": upload_name}
+        if folder_id:
+            metadata["parents"] = [folder_id]
+
+        # Create media upload
+        media = MediaFileUpload(str(file_path), mimetype=mime_type, resumable=True)
+
+        # Upload file (no permissions = private to owner only)
+        file = service.files().create(
+            body=metadata,
+            media_body=media,
+            fields="id, name, mimeType, webViewLink, webContentLink",
+        ).execute()
+
+        file_id = file.get("id", "")
+        result_mime = file.get("mimeType", mime_type)
+        url = get_file_url(file_id, result_mime)
+
+        if json_output:
+            stdout_console.print_json(json.dumps({
+                "file_id": file_id,
+                "name": file.get("name"),
+                "mime_type": result_mime,
+                "url": url,
+            }))
+        else:
+            console.print(f"[green]Uploaded:[/green] {upload_name}")
+            console.print(f"ID: {file_id}")
+            console.print(f"URL: {url}")
+
+    except HttpError as e:
+        console.print(f"[red]API Error:[/red] {e.reason}")
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()

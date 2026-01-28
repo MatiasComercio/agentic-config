@@ -86,6 +86,7 @@ On user correction -> read `cookbook/preferences.md` for storage flow.
 
 ## Anti-Patterns (NEVER DO)
 
+- **NEVER create public assets** - All Drive files, Docs, Sheets, Slides must remain private. Never use `role: anyone`, `type: anyone`, or public visibility settings unless user explicitly requests AND confirms.
 - Assuming tool names without verifying (`ls tools/` first)
 - Searching People API before reading `people.md` customization
 - Executing tools before reading their cookbook
