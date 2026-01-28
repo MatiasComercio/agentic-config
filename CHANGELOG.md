@@ -4,6 +4,30 @@ All notable changes to agentic-config.
 
 ## [Unreleased]
 
+### Added
+
+- `gsuite` skill for Claude Code providing READ and WRITE access to Google Suite
+  - Multi-account authentication with account switching (similar to `gh auth status`/`gh auth switch`)
+  - Support for both enterprise (Workspace) and personal Google accounts
+  - Google Sheets API: read/write cells, batch operations, formulas, formatting
+  - Google Docs API: read/write content, tables, formatting, PDF export
+  - Google Slides API: read/write presentations, manage slides, text formatting
+  - Google Drive API: list files, share, permissions, directories, copy, comments with suggestions support
+  - Gmail API: list/read/send/draft messages, search with Gmail query syntax
+  - Google Calendar API: list/create/update/delete events, attendees, recurrence
+  - Google Tasks API: list/create/complete/delete tasks across task lists
+  - People API: contact search for recipient resolution in email workflows
+  - Account management: `gsuite auth status`, `gsuite auth add`, `gsuite auth switch`, `gsuite auth remove`
+  - Automated setup: `setup.py` for Google Cloud project configuration
+  - OAuth 2.0 flow with automatic token refresh for personal accounts
+  - Enterprise domain-wide delegation support for Workspace accounts
+  - Write operation confirmation (configurable via config.yml or --yes flag)
+  - Mandatory recipient resolution workflow (preferences -> People API -> confirm)
+  - Agent orchestrator pattern for parallel multi-operation handling
+  - PEP 723 self-contained CLI tools with inline dependency management
+  - User customization support via `$AGENTIC_GLOBAL/customization/gsuite/`
+  - CLI tools (11): auth.py, setup.py, sheets.py, docs.py, slides.py, drive.py, gmail.py, gcalendar.py, tasks.py, people.py, utils.py
+
 ## [0.1.16] - 2026-01-09
 
 ### Added
