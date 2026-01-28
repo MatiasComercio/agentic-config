@@ -4,16 +4,22 @@ Gmail operations and confirmation rules.
 
 ## Confirmation Rules
 
-Write operations (send, draft) require user confirmation by default.
+Write operations require user confirmation by default.
 
 | Operation | Confirmation Required | Bypass Flag |
 |-----------|----------------------|-------------|
 | `send` | Yes | `--yes` |
+| `reply` | Yes | `--yes` |
 | `draft` | Yes | `--yes` |
+| `archive` | Yes | `--yes` |
+| `label add` | Yes | `--yes` |
+| `label remove` | Yes | `--yes` |
+| `delete` | Yes | `--yes` |
 | `list` | No | - |
 | `read` | No | - |
 | `search` | No | - |
 | `labels` | No | - |
+| `label show` | No | - |
 
 ## Commands Reference
 
@@ -38,7 +44,41 @@ uv run core/skills/gsuite/tools/gmail.py search "from:user@example.com"
 
 # List labels
 uv run core/skills/gsuite/tools/gmail.py labels
+
+# Archive message (remove from inbox)
+uv run core/skills/gsuite/tools/gmail.py archive <message_id>
+
+# Show labels on a message
+uv run core/skills/gsuite/tools/gmail.py label show <message_id>
+
+# Add label to message
+uv run core/skills/gsuite/tools/gmail.py label add <message_id> STARRED --yes
+
+# Remove label from message
+uv run core/skills/gsuite/tools/gmail.py label remove <message_id> UNREAD --yes
 ```
+
+## Common Label IDs
+
+System labels (case-sensitive):
+
+| Label ID | Description |
+|----------|-------------|
+| `INBOX` | Messages in inbox |
+| `SPAM` | Spam folder |
+| `TRASH` | Trash folder |
+| `UNREAD` | Unread messages |
+| `STARRED` | Starred messages |
+| `IMPORTANT` | Marked important |
+| `SENT` | Sent messages |
+| `DRAFT` | Draft messages |
+| `CATEGORY_PERSONAL` | Personal category |
+| `CATEGORY_SOCIAL` | Social category |
+| `CATEGORY_PROMOTIONS` | Promotions category |
+| `CATEGORY_UPDATES` | Updates category |
+| `CATEGORY_FORUMS` | Forums category |
+
+User labels have custom IDs - use `labels` command to list them.
 
 ## Recipient Resolution
 

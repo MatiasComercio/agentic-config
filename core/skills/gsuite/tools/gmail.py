@@ -36,6 +36,8 @@ from auth import get_credentials  # noqa: E402
 from utils import confirm_action, merge_extra  # noqa: E402
 
 app = typer.Typer(help="Gmail CLI operations.")
+label_app = typer.Typer(help="Manage message labels.")
+app.add_typer(label_app, name="label")
 console = Console(stderr=True)
 stdout_console = Console()
 
@@ -524,6 +526,139 @@ def list_labels(
             )
 
         console.print(table)
+
+    except HttpError as e:
+        console.print(f"[red]API Error:[/red] {e.reason}")
+        raise typer.Exit(1)
+
+
+@app.command()
+def archive(
+    message_id: Annotated[str, typer.Argument(help="Message ID to archive")],
+    account: Annotated[str | None, typer.Option("--account", "-a", help="Account email (default: active)")] = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+) -> None:
+    """Archive a message (remove from INBOX)."""
+    if not confirm_action("Archive message", f"ID: {message_id}", "gmail", skip_confirmation=yes):
+        console.print("[yellow]Cancelled.[/yellow]")
+        raise typer.Exit(0)
+
+    try:
+        service = get_gmail_service(account)
+        result = service.users().messages().modify(
+            userId="me",
+            id=message_id,
+            body={"removeLabelIds": ["INBOX"]},
+        ).execute()
+
+        if json_output:
+            stdout_console.print_json(json.dumps({
+                "archived": True,
+                "id": message_id,
+                "labels": result.get("labelIds", []),
+            }))
+        else:
+            console.print(f"[green]Archived:[/green] {message_id}")
+
+    except HttpError as e:
+        console.print(f"[red]API Error:[/red] {e.reason}")
+        raise typer.Exit(1)
+
+
+@label_app.command("show")
+def label_show(
+    message_id: Annotated[str, typer.Argument(help="Message ID")],
+    account: Annotated[str | None, typer.Option("--account", "-a", help="Account email (default: active)")] = None,
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+) -> None:
+    """Show labels on a message."""
+    try:
+        service = get_gmail_service(account)
+        message = service.users().messages().get(
+            userId="me", id=message_id, format="minimal",
+        ).execute()
+
+        labels = message.get("labelIds", [])
+
+        if json_output:
+            stdout_console.print_json(json.dumps({
+                "id": message_id,
+                "labels": labels,
+            }))
+        else:
+            console.print(f"[cyan]Message:[/cyan] {message_id}")
+            console.print(f"[cyan]Labels:[/cyan] {', '.join(labels) if labels else '(none)'}")
+
+    except HttpError as e:
+        console.print(f"[red]API Error:[/red] {e.reason}")
+        raise typer.Exit(1)
+
+
+@label_app.command("add")
+def label_add(
+    message_id: Annotated[str, typer.Argument(help="Message ID")],
+    label_id: Annotated[str, typer.Argument(help="Label ID to add")],
+    account: Annotated[str | None, typer.Option("--account", "-a", help="Account email (default: active)")] = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+) -> None:
+    """Add a label to a message."""
+    if not confirm_action("Add label", f"Label: {label_id}\nMessage: {message_id}", "gmail", skip_confirmation=yes):
+        console.print("[yellow]Cancelled.[/yellow]")
+        raise typer.Exit(0)
+
+    try:
+        service = get_gmail_service(account)
+        result = service.users().messages().modify(
+            userId="me",
+            id=message_id,
+            body={"addLabelIds": [label_id]},
+        ).execute()
+
+        if json_output:
+            stdout_console.print_json(json.dumps({
+                "id": message_id,
+                "added": label_id,
+                "labels": result.get("labelIds", []),
+            }))
+        else:
+            console.print(f"[green]Added label:[/green] {label_id} to {message_id}")
+
+    except HttpError as e:
+        console.print(f"[red]API Error:[/red] {e.reason}")
+        raise typer.Exit(1)
+
+
+@label_app.command("remove")
+def label_remove(
+    message_id: Annotated[str, typer.Argument(help="Message ID")],
+    label_id: Annotated[str, typer.Argument(help="Label ID to remove")],
+    account: Annotated[str | None, typer.Option("--account", "-a", help="Account email (default: active)")] = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation")] = False,
+    json_output: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+) -> None:
+    """Remove a label from a message."""
+    if not confirm_action("Remove label", f"Label: {label_id}\nMessage: {message_id}", "gmail", skip_confirmation=yes):
+        console.print("[yellow]Cancelled.[/yellow]")
+        raise typer.Exit(0)
+
+    try:
+        service = get_gmail_service(account)
+        result = service.users().messages().modify(
+            userId="me",
+            id=message_id,
+            body={"removeLabelIds": [label_id]},
+        ).execute()
+
+        if json_output:
+            stdout_console.print_json(json.dumps({
+                "id": message_id,
+                "removed": label_id,
+                "labels": result.get("labelIds", []),
+            }))
+        else:
+            console.print(f"[green]Removed label:[/green] {label_id} from {message_id}")
 
     except HttpError as e:
         console.print(f"[red]API Error:[/red] {e.reason}")
