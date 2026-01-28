@@ -46,6 +46,11 @@ For delegation patterns and examples, see `cookbook/orchestration.md`.
 
 **Customization:** `<tool>.py` -> `$AGENTIC_GLOBAL/customization/gsuite/<tool>.md`
 
+**Large Content Strategy:** For multi-line or complex content (e.g.: docs, emails, slides):
+1. Write content to temp file first (e.g., `/tmp/content.md`)
+2. Pipe/cat file to CLI tool: `cat /tmp/content.md | uv run <tool>.py write ...`
+3. Benefits: Avoids shell escaping issues, handles large content reliably, easier to debug
+
 ## Workflow
 
 ### 1. Initialize
