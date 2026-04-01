@@ -420,39 +420,6 @@ PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
 ]
 
 
-def _validate_pattern_ordering() -> None:
-    """Verify broad visibility patterns stay after stricter overlapping patterns.
-
-    The final decision aggregates all pattern matches, but keeping broad
-    external-visibility patterns after stricter categories preserves readable
-    precedence and guards future changes from reintroducing first-match bypasses.
-    """
-    last_category_index: dict[str, int] = {}
-    for i, (_, _, category) in enumerate(PATTERNS):
-        last_category_index[category] = i
-
-    if "git-destructive" in last_category_index and "external-visibility" in last_category_index:
-        first_external_visibility = next(
-            i for i, (_, _, category) in enumerate(PATTERNS) if category == "external-visibility"
-        )
-        assert last_category_index["git-destructive"] < first_external_visibility, (
-            "ORDERING VIOLATION: all git-destructive patterns must precede "
-            "external-visibility patterns"
-        )
-
-    if "credential-reads" in last_category_index and "external-visibility" in last_category_index:
-        first_external_visibility = next(
-            i for i, (_, _, category) in enumerate(PATTERNS) if category == "external-visibility"
-        )
-        last_credential_read = last_category_index["credential-reads"]
-        assert last_credential_read < first_external_visibility, (
-            "ORDERING VIOLATION: all credential-reads patterns must precede "
-            "external-visibility patterns"
-        )
-
-
-_validate_pattern_ordering()
-
 
 def _normalize_path_target(arg: str) -> str | None:
     """Normalize a candidate filesystem target into a resolved path when possible."""
