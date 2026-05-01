@@ -74,7 +74,12 @@ export interface BridgeParentState {
 	deliveredEventIds: string[];
 	terminalEventId?: string;
 	terminalFinalizedAt?: string;
+	terminalObservedAt?: string;
 	terminalState?: SettledTerminalState;
+	terminalNotificationQueuedAt?: string;
+	terminalNotificationDeliveredAt?: string;
+	terminalNotificationBatchId?: string;
+	terminalNotificationAttemptCount?: number;
 	protocolViolationReason?: string;
 	updatedAt?: string;
 }
@@ -150,7 +155,12 @@ function mergeBridgeParentState(current: BridgeParentState, next: BridgeParentSt
 		deliveredEventIds: uniqueStrings([...(current.deliveredEventIds ?? []), ...(next.deliveredEventIds ?? [])]),
 		terminalEventId: next.terminalEventId ?? current.terminalEventId,
 		terminalFinalizedAt: preferLatestIso(current.terminalFinalizedAt, next.terminalFinalizedAt),
+		terminalObservedAt: preferLatestIso(current.terminalObservedAt, next.terminalObservedAt),
 		terminalState: next.terminalState ?? current.terminalState,
+		terminalNotificationQueuedAt: preferLatestIso(current.terminalNotificationQueuedAt, next.terminalNotificationQueuedAt),
+		terminalNotificationDeliveredAt: preferLatestIso(current.terminalNotificationDeliveredAt, next.terminalNotificationDeliveredAt),
+		terminalNotificationBatchId: next.terminalNotificationBatchId ?? current.terminalNotificationBatchId,
+		terminalNotificationAttemptCount: Math.max(current.terminalNotificationAttemptCount ?? 0, next.terminalNotificationAttemptCount ?? 0),
 		protocolViolationReason: next.protocolViolationReason ?? current.protocolViolationReason,
 	};
 }
@@ -382,6 +392,7 @@ export function buildChildProtocol(launch: BridgeLaunchFile): string {
 		"- FIRST: do not poll pimux and do not use Bash sleep/wait loops; wait for delivered child activity.",
 		"- Work on the assigned mission normally.",
 		"- Parent -> child messaging uses pimux send_message and arrives through the bridge inbox.",
+		"- A parent status_request is a liveness probe: reply promptly with report_parent(progress) if still working, or emit closeout/blocker/failure if terminal.",
 		"- Child -> parent reporting uses pimux report_parent only from this authoritative direct child session.",
 		"- If you launch local helpers or subagents, they are local-only and must not call pimux or report_parent.",
 		"- If you act as an orchestrator, you own the control-plane for your subtree.",

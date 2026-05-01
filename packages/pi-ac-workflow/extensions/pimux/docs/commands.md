@@ -12,6 +12,8 @@ Use `/pimux` with:
 - `tree`
 - `navigate`
 - `status`
+- `activity`
+- `ping`
 - `capture`
 - `send`
 - `kill`
@@ -28,6 +30,8 @@ Use the `pimux` tool with actions:
 - `list`
 - `tree`
 - `status`
+- `activity`
+- `ping_agent`
 - `capture`
 - `send_message`
 - `report_parent`
@@ -67,13 +71,15 @@ Valid `report_parent` kinds:
 
 Parent-side interface delivery should also show parent -> child bridge messages as concise pimux events without triggering an extra turn.
 
-After a terminal `report_parent`, the pimux runtime should finalize the managed session promptly.
+After a terminal `report_parent`, the pimux runtime batches bursty terminal notifications and keeps terminal notification state retryable until the parent delivery queue records delivery.
 
 ## Inspection
 
 - `list` for current-session agents by default
 - `tree` for hierarchy shape
-- `status` for one agent plus settlement state
+- `status` for one agent plus settlement state and pane tail
+- `activity` for deterministic no-capture state (`running_recent_activity`, `running_quiet`, `settled`, `missing_session`, `terminated`, or `protocol_violation`)
+- `ping_agent` / `ping` to send a correlated `status_request`; the child must respond with `progress` if still working or a terminal report if done, blocked, or failed
 - `capture` for pane text
 - `open` to inspect live in iTerm
 - `navigate` to select a node from the current-session hierarchy and act on it

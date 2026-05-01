@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { promises as fs, watch as watchFs } from "node:fs";
 import type { FSWatcher } from "node:fs";
 import * as path from "node:path";
@@ -36,6 +37,7 @@ import {
 import {
 	CONTROL_PLANE_LOCK_ENTRY_TYPE,
 	NO_POLLING_SUPERVISION_ENTRY_TYPE,
+	CONTROL_PLANE_INACTIVITY_WATCHDOG_MS,
 	buildControlPlaneLock,
 	buildControlPlaneSystemPrompt,
 	buildNoPollingSupervisionForSpawn,
@@ -66,6 +68,7 @@ import {
 	filterStatusesForList,
 	findBlockingDirectChildrenForCloseout,
 	flattenTreeNodes,
+	formatAgentActivitySnapshot,
 	formatAgentDetails,
 	formatAgentSummary,
 	formatPruneCandidate,
@@ -73,6 +76,7 @@ import {
 	readRegistry,
 	readSessionRegistry,
 	rememberSessionBridge,
+	resolveAgentActivitySnapshot,
 	resolvePruneAgeReference,
 	resolveStatuses,
 	resolveTargetFromInput,
@@ -110,6 +114,7 @@ import {
 	shouldDeliverBridgeEventToParent,
 	shouldTriggerTurnForEvent,
 	shouldTriggerTurnForSettledState,
+	type SettledTerminalState,
 } from "./settlement.ts";
 import {
 	buildSessionName,
@@ -149,6 +154,23 @@ interface ReportParentRequest {
 	requiresResponse?: boolean;
 }
 
+interface QueuedParentDelivery {
+	key: string;
+	bridgeDir: string;
+	launch: BridgeLaunchFile;
+	content: string;
+	triggerTurn: boolean;
+	eventIds: string[];
+	terminalEventId?: string;
+	settledState?: SettledTerminalState;
+	createdAt: string;
+}
+
+interface ParentBridgeProcessingState {
+	running: boolean;
+	rerunRequested: boolean;
+}
+
 interface ParsedArgs {
 	flags: Map<string, string | boolean>;
 	positionals: string[];
@@ -163,6 +185,8 @@ function buildUsage(): string {
 		"  /pimux tree [--all] [--include-exited] [--root ID]",
 		"  /pimux navigate [--all] [--include-exited] [--root ID]",
 		"  /pimux status [target|last]",
+		"  /pimux activity [target|last]",
+		"  /pimux ping [target|last] [message]",
 		"  /pimux capture [target|last] [--lines N]",
 		"  /pimux send [target|last] <message>",
 		"  /pimux kill [target|last]",
@@ -574,11 +598,7 @@ async function treeManagedAgents(
 	return { lines: buildTreeLines(nodes, formatOptions), nodes };
 }
 
-async function statusManagedAgent(
-	ctx: ExtensionContext,
-	target: string | undefined,
-	lines = 40,
-): Promise<{ status: ResolvedStatus; capture?: string }> {
+async function resolveManagedAgentStatus(ctx: ExtensionContext, target: string | undefined): Promise<ResolvedStatus> {
 	const stateRoot = getStateRoot(ctx.cwd);
 	const registry = await readRegistry(stateRoot);
 	const currentEnv = getCurrentEnv();
@@ -587,6 +607,15 @@ async function statusManagedAgent(
 	const statuses = await resolveStatuses(stateRoot, registry);
 	const status = statuses.find((entry) => entry.record.agentId === record.agentId);
 	if (!status) throw new Error(`Managed agent not found: ${target ?? "(none)"}`);
+	return status;
+}
+
+async function statusManagedAgent(
+	ctx: ExtensionContext,
+	target: string | undefined,
+	lines = 40,
+): Promise<{ status: ResolvedStatus; capture?: string }> {
+	const status = await resolveManagedAgentStatus(ctx, target);
 	let capture: string | undefined;
 	if (status.hasSession) {
 		capture = await captureTmuxPane(status.record.sessionName, lines).catch(() => undefined);
@@ -602,6 +631,56 @@ async function captureManagedAgent(
 	const result = await statusManagedAgent(ctx, target, lines);
 	if (!result.capture) throw new Error(`No tmux pane capture available for ${target ?? "(current)"}`);
 	return { status: result.status, capture: result.capture };
+}
+
+async function activityManagedAgent(ctx: ExtensionContext, target: string | undefined): Promise<{ status: ResolvedStatus; activity: Awaited<ReturnType<typeof resolveAgentActivitySnapshot>> }> {
+	const status = await resolveManagedAgentStatus(ctx, target);
+	const activity = await resolveAgentActivitySnapshot(status, CONTROL_PLANE_INACTIVITY_WATCHDOG_MS);
+	return { status, activity };
+}
+
+async function pingManagedAgent(
+	ctx: ExtensionContext,
+	target: string | undefined,
+	message?: string,
+): Promise<{ status: ResolvedStatus; activity: Awaited<ReturnType<typeof resolveAgentActivitySnapshot>>; requestId?: string; event?: BridgeEvent }> {
+	const result = await activityManagedAgent(ctx, target);
+	if (result.activity.bridgeSettlementState !== "running" || result.activity.activityState === "terminated" || result.activity.activityState === "missing_session") {
+		return result;
+	}
+	const record = result.status.record;
+	if (!record.bridgeDir || !record.launchId) {
+		throw new Error(`Managed agent ${record.agentId} does not have a bridge inbox.`);
+	}
+	const currentEnv = getCurrentEnv();
+	const requestId = `status-${randomUUID()}`;
+	const summary = `status request ${requestId}`;
+	const payload = [
+		`PIMUX_STATUS_REQUEST ${requestId}`,
+		"Reply promptly via pimux report_parent:",
+		"- reportKind=progress if you are still working; include this request id in the summary.",
+		"- reportKind=closeout if the mission is complete.",
+		"- reportKind=blocker or reportKind=failure if terminally blocked or failed.",
+		message?.trim() ? `Parent note: ${message.trim()}` : undefined,
+	].filter((line): line is string => Boolean(line)).join("\n");
+	const event = await appendBridgeEvent(record.bridgeDir, {
+		launchId: record.launchId,
+		direction: "parent_to_child",
+		type: "status_request",
+		from: { agentId: currentEnv.agentId ?? "human", sessionFile: ctx.sessionManager.getSessionFile() ?? undefined },
+		to: { agentId: record.agentId, sessionName: record.sessionName },
+		summary,
+		message: payload,
+	});
+	await writeBridgeEventSignal(record.bridgeDir, event, true);
+	record.lastMessageAt = nowIso();
+	record.updatedAt = record.lastMessageAt;
+	await updateRegistry(getStateRoot(ctx.cwd), (next) => {
+		const found = next.agents.find((entry) => entry.agentId === record.agentId);
+		if (found) Object.assign(found, record);
+	});
+	await persistAgentManifest(record);
+	return { ...result, requestId, event };
 }
 
 async function openManagedAgent(ctx: ExtensionContext, target: string | undefined): Promise<ManagedAgentRecord> {
@@ -1081,6 +1160,8 @@ function buildToolResult(text: string, details: Record<string, unknown>) {
 
 const CONTROL_PLANE_ACTIVE_TOOLS = ["pimux", "AskUserQuestion", "say"];
 const NO_POLLING_SPAWN_ECHO = "NO-POLL: do not poll pimux or use Bash sleep/wait loops; wait for delivered child activity.";
+const PARENT_DELIVERY_DEBOUNCE_MS = 75;
+const BACKGROUND_MONITOR_INTERVAL_MS = 30_000;
 
 function filterAvailableTools(pi: ExtensionAPI, requestedTools: string[]): string[] {
 	const available = new Set(pi.getAllTools().map((tool) => tool.name));
@@ -1163,7 +1244,11 @@ function getSessionBridgeEntries(ctx: ExtensionContext): SessionBridgeEntry[] {
 export default function pimuxExtension(pi: ExtensionAPI) {
 	const parentBridgeWatchers = new Map<string, FSWatcher>();
 	let childBridgeWatcher: FSWatcher | undefined;
-	const processingParentBridges = new Set<string>();
+	const processingParentBridges = new Map<string, ParentBridgeProcessingState>();
+	const parentDeliveryQueue = new Map<string, QueuedParentDelivery>();
+	const watchdogNotifiedAtByAgent = new Map<string, string>();
+	let parentDeliveryFlushTimer: ReturnType<typeof setTimeout> | undefined;
+	let backgroundMonitorTimer: ReturnType<typeof setInterval> | undefined;
 	let processingChildBridge = false;
 	const queuedChildInboxEventIds = new Set<string>();
 	let controlPlaneLock: ControlPlaneLockState | undefined;
@@ -1215,68 +1300,167 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 		restoreToolSurface(pi, restored.previousActiveTools);
 	};
 
+	const buildParentDeliveryBatchContent = (deliveries: QueuedParentDelivery[], batchId: string): string => {
+		if (deliveries.length === 1) return deliveries[0].content;
+		return [
+			`# pimux reports: ${deliveries.length} updates`,
+			`Batch ID: ${batchId}`,
+			"",
+			...deliveries.flatMap((delivery, index) => [
+				`## ${index + 1}. ${delivery.launch.agentId}`,
+				"",
+				delivery.content,
+				"",
+			]),
+		].join("\n").trimEnd();
+	};
+
+	const updateTerminalNotificationState = async (
+		deliveries: QueuedParentDelivery[],
+		batchId: string,
+		phase: "queued" | "delivered",
+	): Promise<void> => {
+		const terminalDeliveries = deliveries.filter((delivery) => delivery.settledState);
+		for (const delivery of terminalDeliveries) {
+			const parentState = await readBridgeParentState(delivery.bridgeDir).catch(() => ({ deliveredEventIds: [] }));
+			const timestamp = nowIso();
+			parentState.terminalEventId = delivery.terminalEventId;
+			parentState.terminalState = delivery.settledState;
+			parentState.terminalNotificationBatchId = batchId;
+			if (phase === "queued") {
+				parentState.terminalNotificationQueuedAt = timestamp;
+				parentState.terminalNotificationAttemptCount = (parentState.terminalNotificationAttemptCount ?? 0) + 1;
+			} else {
+				parentState.terminalNotificationDeliveredAt = timestamp;
+			}
+			await writeBridgeParentState(delivery.bridgeDir, parentState);
+		}
+	};
+
+	const flushParentDeliveryQueue = async (ctx: ExtensionContext): Promise<void> => {
+		parentDeliveryFlushTimer = undefined;
+		if (parentDeliveryQueue.size === 0) return;
+		const deliveries = [...parentDeliveryQueue.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.key.localeCompare(right.key));
+		parentDeliveryQueue.clear();
+		const batchId = `pimux-batch-${randomUUID()}`;
+		await updateTerminalNotificationState(deliveries, batchId, "queued");
+		try {
+			pi.sendMessage(
+				{
+					customType: "pimux-report",
+					content: buildParentDeliveryBatchContent(deliveries, batchId),
+					display: true,
+					details: { batchId, deliveries },
+				},
+				deliveries.some((delivery) => delivery.triggerTurn)
+					? { triggerTurn: true, deliverAs: "followUp" }
+					: { triggerTurn: false },
+			);
+			await updateTerminalNotificationState(deliveries, batchId, "delivered");
+		} catch (error) {
+			for (const delivery of deliveries) parentDeliveryQueue.set(delivery.key, delivery);
+			if (!parentDeliveryFlushTimer) {
+				parentDeliveryFlushTimer = setTimeout(() => {
+					void flushParentDeliveryQueue(ctx).catch((flushError) => console.error(flushError));
+				}, PARENT_DELIVERY_DEBOUNCE_MS);
+				parentDeliveryFlushTimer.unref?.();
+			}
+			throw error;
+		}
+	};
+
+	const enqueueParentDelivery = (delivery: QueuedParentDelivery, ctx: ExtensionContext): void => {
+		parentDeliveryQueue.set(delivery.key, delivery);
+		if (parentDeliveryFlushTimer) return;
+		parentDeliveryFlushTimer = setTimeout(() => {
+			void flushParentDeliveryQueue(ctx).catch((error) => console.error(error));
+		}, PARENT_DELIVERY_DEBOUNCE_MS);
+		parentDeliveryFlushTimer.unref?.();
+	};
+
 	const updateDashboard = async (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
 		const statuses = await listManagedAgents(ctx, { scope: "session", includeExited: false }).catch(() => []);
 		ctx.ui.setWidget(EXTENSION_NAME, dashboardLines(statuses));
 	};
 
-	const processBridgeDeliveries = async (bridgeDir: string, sessionKey: string, ctx: ExtensionContext) => {
-		if (processingParentBridges.has(bridgeDir)) return;
-		processingParentBridges.add(bridgeDir);
-		try {
-			const launch = await readBridgeLaunch(bridgeDir);
-			if (launch.parentSessionKey !== sessionKey) return;
-			let parentState = await readBridgeParentState(bridgeDir);
-			const delivered = new Set(parentState.deliveredEventIds);
-			let changed = false;
-			let events = await readBridgeEvents(bridgeDir);
-			let terminalReportForAutoExit: BridgeEvent | undefined;
-			const currentLock = getParentControlPlaneLock(ctx, controlPlaneLock);
-			const currentSupervision = noPollingSupervision;
-			let nextLock = currentLock;
-			let nextSupervision = currentSupervision;
-			for (const event of events) {
-				if (delivered.has(event.eventId)) continue;
-				if (isTerminalChildReportEvent(event)) {
-					terminalReportForAutoExit = event;
-				}
-				if (event.direction === "child_to_parent" && !isTerminalChildReportEvent(event)) {
-					nextLock = updateControlPlaneLockForChildActivity(nextLock, {
-						agentId: launch.agentId,
-						eventId: event.eventId,
-						timestamp: event.timestamp,
-					});
-					nextSupervision = updateNoPollingSupervisionForChildActivity(nextSupervision, {
-						agentId: launch.agentId,
-						eventId: event.eventId,
-						timestamp: event.timestamp,
-					});
-				}
-				if (shouldDeliverBridgeEventToParent(event)) {
-					const content = await buildParentDeliveryContent(event, launch);
-					pi.sendMessage(
-						{ customType: "pimux-report", content, display: true, details: { launch, event } },
-						shouldTriggerTurnForEvent(event, launch)
-							? { triggerTurn: true, deliverAs: "followUp" }
-							: { triggerTurn: false },
-					);
-				}
+	const processBridgeDeliveriesOnce = async (bridgeDir: string, sessionKey: string, ctx: ExtensionContext) => {
+		const launch = await readBridgeLaunch(bridgeDir);
+		if (launch.parentSessionKey !== sessionKey) return;
+		let parentState = await readBridgeParentState(bridgeDir);
+		const delivered = new Set(parentState.deliveredEventIds);
+		let changed = false;
+		let events = await readBridgeEvents(bridgeDir);
+		let terminalReportForAutoExit: BridgeEvent | undefined;
+		const currentLock = getParentControlPlaneLock(ctx, controlPlaneLock);
+		const currentSupervision = noPollingSupervision;
+		let nextLock = currentLock;
+		let nextSupervision = currentSupervision;
+		for (const event of events) {
+			const terminalReport = isTerminalChildReportEvent(event);
+			if (!terminalReport && delivered.has(event.eventId)) continue;
+			if (terminalReport) {
+				terminalReportForAutoExit = event;
+			}
+			if (event.direction === "child_to_parent" && !terminalReport) {
+				nextLock = updateControlPlaneLockForChildActivity(nextLock, {
+					agentId: launch.agentId,
+					eventId: event.eventId,
+					timestamp: event.timestamp,
+				});
+				nextSupervision = updateNoPollingSupervisionForChildActivity(nextSupervision, {
+					agentId: launch.agentId,
+					eventId: event.eventId,
+					timestamp: event.timestamp,
+				});
+			}
+			if (shouldDeliverBridgeEventToParent(event)) {
+				const content = await buildParentDeliveryContent(event, launch);
+				enqueueParentDelivery(
+					{
+						key: `event:${event.eventId}`,
+						bridgeDir,
+						launch,
+						content,
+						triggerTurn: shouldTriggerTurnForEvent(event, launch),
+						eventIds: [event.eventId],
+						createdAt: event.timestamp,
+					},
+					ctx,
+				);
+				delivered.add(event.eventId);
+				changed = true;
+			} else if (!terminalReport) {
 				delivered.add(event.eventId);
 				changed = true;
 			}
-			if (terminalReportForAutoExit && !events.some((event) => event.direction === "system" && event.type === "exited")) {
-				events = await finalizeManagedAgentAfterTerminalReport(launch, ctx);
-				parentState = await readBridgeParentState(bridgeDir);
-			}
-			const settlement = evaluateBridgeSettlement(events);
-			const alreadyFinalized =
-				Boolean(parentState.terminalFinalizedAt) &&
+		}
+		if (terminalReportForAutoExit && !events.some((event) => event.direction === "system" && event.type === "exited")) {
+			events = await finalizeManagedAgentAfterTerminalReport(launch, ctx);
+			parentState = await readBridgeParentState(bridgeDir);
+		}
+		const settlement = evaluateBridgeSettlement(events);
+		if (settlement.settledState !== "running") {
+			const finalizedAt = parentState.terminalFinalizedAt ?? nowIso();
+			const alreadyObserved =
+				Boolean(parentState.terminalObservedAt) &&
 				parentState.terminalState === settlement.settledState &&
 				parentState.terminalEventId === settlement.terminalEvent?.eventId &&
 				parentState.protocolViolationReason === settlement.protocolViolationReason;
-			if (settlement.settledState !== "running" && !alreadyFinalized) {
-				const finalizedAt = nowIso();
+			const notificationDelivered =
+				Boolean(parentState.terminalNotificationDeliveredAt) &&
+				parentState.terminalState === settlement.settledState &&
+				parentState.terminalEventId === settlement.terminalEvent?.eventId &&
+				parentState.protocolViolationReason === settlement.protocolViolationReason;
+			if (!alreadyObserved) {
+				parentState.terminalState = settlement.settledState;
+				parentState.terminalEventId = settlement.terminalEvent?.eventId;
+				parentState.terminalFinalizedAt = finalizedAt;
+				parentState.terminalObservedAt = finalizedAt;
+				parentState.protocolViolationReason = settlement.protocolViolationReason;
+				changed = true;
+			}
+			if (!notificationDelivered) {
 				let content: string;
 				if (settlement.terminalEvent) {
 					content = await buildParentDeliveryContent(settlement.terminalEvent, launch, {
@@ -1292,16 +1476,20 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 						settlement.protocolViolationReason ?? "Child exited without a valid terminal declaration.",
 					);
 				}
-				pi.sendMessage(
-					{ customType: "pimux-report", content, display: true, details: { launch, settlement, finalizedAt } },
-					shouldTriggerTurnForSettledState(settlement.settledState, launch)
-						? { triggerTurn: true, deliverAs: "followUp" }
-						: { triggerTurn: false },
+				enqueueParentDelivery(
+					{
+						key: `settlement:${bridgeDir}:${settlement.terminalEvent?.eventId ?? settlement.settledState}`,
+						bridgeDir,
+						launch,
+						content,
+						triggerTurn: shouldTriggerTurnForSettledState(settlement.settledState, launch),
+						eventIds: settlement.terminalEvent ? [settlement.terminalEvent.eventId] : [],
+						terminalEventId: settlement.terminalEvent?.eventId,
+						settledState: settlement.settledState,
+						createdAt: finalizedAt,
+					},
+					ctx,
 				);
-				parentState.terminalState = settlement.settledState;
-				parentState.terminalEventId = settlement.terminalEvent?.eventId;
-				parentState.terminalFinalizedAt = finalizedAt;
-				parentState.protocolViolationReason = settlement.protocolViolationReason;
 				nextLock = updateControlPlaneLockForTerminalSettlement(nextLock, {
 					agentId: launch.agentId,
 					eventId: settlement.terminalEvent?.eventId,
@@ -1312,20 +1500,35 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 					eventId: settlement.terminalEvent?.eventId,
 					timestamp: finalizedAt,
 				});
-				changed = true;
 			}
-			if (nextLock && nextLock !== currentLock) {
-				persistControlPlaneLock(nextLock);
-				applyControlPlaneToolSurface(pi);
-			}
-			if (nextSupervision && nextSupervision !== currentSupervision) {
-				persistNoPollingSupervision(nextSupervision);
-			}
-			if (changed) {
-				parentState.deliveredEventIds = Array.from(delivered).slice(-500);
-				await writeBridgeParentState(bridgeDir, parentState);
-			}
-			await updateDashboard(ctx);
+		}
+		if (nextLock && nextLock !== currentLock) {
+			persistControlPlaneLock(nextLock);
+			applyControlPlaneToolSurface(pi);
+		}
+		if (nextSupervision && nextSupervision !== currentSupervision) {
+			persistNoPollingSupervision(nextSupervision);
+		}
+		if (changed) {
+			parentState.deliveredEventIds = Array.from(delivered).slice(-500);
+			await writeBridgeParentState(bridgeDir, parentState);
+		}
+		await updateDashboard(ctx);
+	};
+
+	const processBridgeDeliveries = async (bridgeDir: string, sessionKey: string, ctx: ExtensionContext) => {
+		const existing = processingParentBridges.get(bridgeDir);
+		if (existing?.running) {
+			existing.rerunRequested = true;
+			return;
+		}
+		const state: ParentBridgeProcessingState = { running: true, rerunRequested: false };
+		processingParentBridges.set(bridgeDir, state);
+		try {
+			do {
+				state.rerunRequested = false;
+				await processBridgeDeliveriesOnce(bridgeDir, sessionKey, ctx);
+			} while (state.rerunRequested);
 		} finally {
 			processingParentBridges.delete(bridgeDir);
 		}
@@ -1352,6 +1555,64 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 			watcher.close();
 			parentBridgeWatchers.delete(bridgeDir);
 		}
+		if (desired.size > 0) ensureBackgroundMonitor(ctx);
+		else stopBackgroundMonitor();
+	};
+
+	const processInactivityWatchdog = async (ctx: ExtensionContext): Promise<void> => {
+		const sessionKey = getSessionKey(ctx);
+		const statuses = await listManagedAgents(ctx, { scope: "session", includeExited: true }).catch(() => []);
+		for (const status of statuses) {
+			if (status.record.parentSessionKey !== sessionKey) continue;
+			if (status.bridgeSettlementState && status.bridgeSettlementState !== "running") continue;
+			if (!status.record.bridgeDir || !status.record.launchId) continue;
+			const activity = await resolveAgentActivitySnapshot(status, CONTROL_PLANE_INACTIVITY_WATCHDOG_MS);
+			if (activity.activityState !== "running_quiet" || activity.quietForMs === undefined) continue;
+			const lastActivity = activity.lastBridgeEventAt ?? status.record.lastSeenAt ?? status.record.createdAt;
+			const lastNotifiedAt = watchdogNotifiedAtByAgent.get(status.record.agentId);
+			if (lastNotifiedAt && lastNotifiedAt >= lastActivity && Date.now() - Date.parse(lastNotifiedAt) < CONTROL_PLANE_INACTIVITY_WATCHDOG_MS) {
+				continue;
+			}
+			const launch = await readBridgeLaunch(status.record.bridgeDir);
+			const content = [
+				"# pimux inactivity watchdog",
+				"",
+				`${status.record.agentId} has had no bridge activity for ${Math.round(activity.quietForMs / 60_000)}m.`,
+				"",
+				"Deterministic state:",
+				...formatAgentActivitySnapshot(activity).map((line) => `- ${line}`),
+				"",
+				"Recommended recovery: use pimux activity for a deterministic check, or pimux ping_agent to request a child response.",
+			].join("\n");
+			enqueueParentDelivery(
+				{
+					key: `watchdog:${status.record.agentId}:${lastActivity}`,
+					bridgeDir: status.record.bridgeDir,
+					launch,
+					content,
+					triggerTurn: true,
+					eventIds: [],
+					createdAt: nowIso(),
+				},
+				ctx,
+			);
+			watchdogNotifiedAtByAgent.set(status.record.agentId, nowIso());
+		}
+	};
+
+	const stopBackgroundMonitor = (): void => {
+		if (!backgroundMonitorTimer) return;
+		clearInterval(backgroundMonitorTimer);
+		backgroundMonitorTimer = undefined;
+	};
+
+	const ensureBackgroundMonitor = (ctx: ExtensionContext): void => {
+		if (backgroundMonitorTimer) return;
+		backgroundMonitorTimer = setInterval(() => {
+			void reconcileParentBridgeWatchers(ctx);
+			void processInactivityWatchdog(ctx);
+		}, BACKGROUND_MONITOR_INTERVAL_MS);
+		backgroundMonitorTimer.unref?.();
 	};
 
 	const processChildInbox = async (ctx: ExtensionContext) => {
@@ -1568,7 +1829,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 				console.log(buildUsage());
 				return;
 			}
-			const selected = await ctx.ui.select("pimux", ["spawn", "open", "list", "tree", "navigate", "status", "capture", "send", "kill", "prune", "unlock", "smoke-nested"]);
+			const selected = await ctx.ui.select("pimux", ["spawn", "open", "list", "tree", "navigate", "status", "activity", "ping", "capture", "send", "kill", "prune", "unlock", "smoke-nested"]);
 			if (!selected) return;
 			await handleCommand(selected, ctx);
 			return;
@@ -1651,6 +1912,39 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 				const lines = [...formatAgentDetails(result.status)];
 				if (result.capture) lines.push("", "capture:", ...result.capture.trimEnd().split(/\r?\n/).slice(-20));
 				await presentText(ctx, `pimux status: ${result.status.record.agentId}`, lines);
+				return;
+			}
+			case "activity": {
+				let target = parsed.positionals[0];
+				if (!target && ctx.hasUI) {
+					const selected = await chooseAgent(ctx, "pimux activity", {
+						includeExited: true,
+						emptyMessage: "No pimux agents are available to inspect.",
+					});
+					target = selected?.agentId;
+					if (!target) return;
+				}
+				const result = await activityManagedAgent(ctx, target);
+				await presentText(ctx, `pimux activity: ${result.status.record.agentId}`, formatAgentActivitySnapshot(result.activity));
+				return;
+			}
+			case "ping": {
+				let [target, ...messageParts] = parsed.positionals;
+				if (!target && ctx.hasUI) {
+					const selected = await chooseAgent(ctx, "pimux ping", {
+						requireSession: true,
+						includeExited: false,
+						emptyMessage: "No live pimux agents are available to ping.",
+					});
+					target = selected?.agentId;
+					if (!target) return;
+				}
+				if (!target) throw new Error("ping requires target");
+				const result = await pingManagedAgent(ctx, target, messageParts.join(" "));
+				const lines = result.requestId
+					? [`Sent status_request ${result.requestId} to ${result.status.record.agentId}.`, "", ...formatAgentActivitySnapshot(result.activity)]
+					: [`No ping sent; ${result.status.record.agentId} is not running for active probe.`, "", ...formatAgentActivitySnapshot(result.activity)];
+				await presentText(ctx, `pimux ping: ${result.status.record.agentId}`, lines);
 				return;
 			}
 			case "capture": {
@@ -1933,6 +2227,11 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 		parentBridgeWatchers.clear();
 		childBridgeWatcher?.close();
 		childBridgeWatcher = undefined;
+		if (parentDeliveryFlushTimer) {
+			clearTimeout(parentDeliveryFlushTimer);
+			parentDeliveryFlushTimer = undefined;
+		}
+		stopBackgroundMonitor();
 	});
 
 	pi.registerCommand("pimux", {
@@ -1958,7 +2257,8 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 			"Use this tool when the user wants long-lived tmux-backed Pi agents managed from the current session.",
 			"Default to headless agents unless the user explicitly wants to watch live.",
 			"Use send_message for parent-to-child messaging and report_parent for child-to-parent reporting.",
-			"Treat status/capture/tree/list/open as recovery-only after spawn; do not inspect routine progress.",
+			"Use activity for deterministic no-capture state checks; use ping_agent to request a correlated child liveness response.",
+			"Treat status/activity/capture/tree/list/open as recovery-only after spawn; do not inspect routine progress.",
 			"Use report_parent only from the authoritative direct pimux child session. Local helpers are local-only and must not call pimux or report_parent.",
 			"Success settles only after closeout plus child exit. Progress is non-terminal; question is terminal waiting-on-parent settlement.",
 			"For same-session child questions that must continue, use report_parent(progress, requiresResponse=true), not question.",
@@ -2017,6 +2317,17 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 						const lines = [...formatAgentDetails(result.status)];
 						if (result.capture) lines.push("", "capture:", ...result.capture.trimEnd().split(/\r?\n/).slice(-20));
 						return buildToolResult(lines.join("\n"), { action: params.action, status: result.status, capture: result.capture });
+					}
+					case "activity": {
+						const result = await activityManagedAgent(ctx, params.target);
+						return buildToolResult(formatAgentActivitySnapshot(result.activity).join("\n"), { action: params.action, status: result.status, activity: result.activity });
+					}
+					case "ping_agent": {
+						const result = await pingManagedAgent(ctx, params.target, params.message);
+						const text = result.requestId
+							? `Sent status_request ${result.requestId} to ${result.status.record.agentId}.`
+							: `No ping sent; ${result.status.record.agentId} is not running for active probe.`;
+						return buildToolResult(text, { action: params.action, status: result.status, activity: result.activity, requestId: result.requestId, event: result.event });
 					}
 					case "capture": {
 						const result = await captureManagedAgent(ctx, params.target, params.lines ?? DEFAULT_CAPTURE_LINES);

@@ -17,7 +17,7 @@ import {
 	truncate,
 	type NotificationMode,
 } from "./paths.ts";
-import { evaluateBridgeSettlement, isSettledTerminalState, type BridgeSettlementState } from "./settlement.ts";
+import { evaluateBridgeSettlement, isSettledTerminalState, isTerminalChildReportEvent, type BridgeSettlementState } from "./settlement.ts";
 import type { ManagedVisualRef } from "./tmux.ts";
 import { tmuxHasSession } from "./tmux.ts";
 
@@ -70,6 +70,29 @@ export interface SessionRegistryFile {
 	updatedAt: string;
 	rootAgentIds: string[];
 	bridgeDirs: string[];
+}
+
+export type AgentActivityState =
+	| "settled"
+	| "running_recent_activity"
+	| "running_quiet"
+	| "missing_session"
+	| "terminated"
+	| "protocol_violation";
+
+export interface AgentActivitySnapshot {
+	agentId: string;
+	effectiveStatus: AgentStatus;
+	bridgeSettlementState: BridgeSettlementState;
+	hasSession: boolean;
+	lastBridgeEventAt?: string;
+	lastBridgeEventType?: string;
+	lastBridgeEventSummary?: string;
+	lastChildReportAt?: string;
+	lastParentMessageAt?: string;
+	lastTerminalEventAt?: string;
+	quietForMs?: number;
+	activityState: AgentActivityState;
 }
 
 export interface ResolvedStatus {
@@ -207,6 +230,93 @@ function formatRecentBridgeEvent(event: BridgeEvent): string {
 
 function formatRecentBridgeEvents(events: BridgeEvent[], limit = 5): string[] {
 	return events.slice(-limit).map(formatRecentBridgeEvent);
+}
+
+function sortBridgeEvents(events: BridgeEvent[]): BridgeEvent[] {
+	return [...events].sort((left, right) => left.timestamp.localeCompare(right.timestamp) || left.eventId.localeCompare(right.eventId));
+}
+
+function latestBridgeEvent(events: BridgeEvent[], predicate: (event: BridgeEvent) => boolean): BridgeEvent | undefined {
+	return sortBridgeEvents(events).filter(predicate).at(-1);
+}
+
+function parseIsoMs(value: string | undefined): number | undefined {
+	if (!value) return undefined;
+	const parsed = Date.parse(value);
+	return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function resolveActivityState(
+	status: ResolvedStatus,
+	bridgeSettlementState: BridgeSettlementState,
+	quietForMs: number | undefined,
+	quietThresholdMs: number,
+): AgentActivityState {
+	if (bridgeSettlementState === "protocol_violation") return "protocol_violation";
+	if (status.record.status === "terminated" || status.effectiveStatus === "terminated") return "terminated";
+	if (bridgeSettlementState !== "running") return "settled";
+	if (!status.hasSession || status.effectiveStatus === "missing") return "missing_session";
+	if (quietForMs !== undefined && quietForMs >= quietThresholdMs) return "running_quiet";
+	return "running_recent_activity";
+}
+
+export function buildAgentActivitySnapshot(
+	status: ResolvedStatus,
+	events: BridgeEvent[],
+	options: { nowMs?: number; quietThresholdMs?: number } = {},
+): AgentActivitySnapshot {
+	const orderedEvents = sortBridgeEvents(events);
+	const settlement = evaluateBridgeSettlement(orderedEvents);
+	const bridgeSettlementState = settlement.settledState !== "running"
+		? settlement.settledState
+		: status.bridgeSettlementState ?? "running";
+	const lastEvent = orderedEvents.at(-1);
+	const lastChildReport = latestBridgeEvent(orderedEvents, (event) => event.direction === "child_to_parent");
+	const lastParentMessage = latestBridgeEvent(orderedEvents, (event) => event.direction === "parent_to_child");
+	const lastTerminalEvent = latestBridgeEvent(orderedEvents, isTerminalChildReportEvent);
+	const nowMs = options.nowMs ?? Date.now();
+	const lastActivityMs = parseIsoMs(lastEvent?.timestamp) ?? parseIsoMs(status.record.lastSeenAt) ?? parseIsoMs(status.record.updatedAt);
+	const quietForMs = lastActivityMs === undefined ? undefined : Math.max(0, nowMs - lastActivityMs);
+	const quietThresholdMs = options.quietThresholdMs ?? 10 * 60_000;
+	return {
+		agentId: status.record.agentId,
+		effectiveStatus: status.effectiveStatus,
+		bridgeSettlementState,
+		hasSession: status.hasSession,
+		lastBridgeEventAt: lastEvent?.timestamp,
+		lastBridgeEventType: lastEvent?.type,
+		lastBridgeEventSummary: lastEvent ? truncate(lastEvent.summary ?? lastEvent.message ?? lastEvent.type, 160) : undefined,
+		lastChildReportAt: lastChildReport?.timestamp,
+		lastParentMessageAt: lastParentMessage?.timestamp,
+		lastTerminalEventAt: lastTerminalEvent?.timestamp,
+		quietForMs,
+		activityState: resolveActivityState(status, bridgeSettlementState, quietForMs, quietThresholdMs),
+	};
+}
+
+export async function resolveAgentActivitySnapshot(
+	status: ResolvedStatus,
+	quietThresholdMs = 10 * 60_000,
+): Promise<AgentActivitySnapshot> {
+	const events = status.record.bridgeDir ? await readBridgeEvents(status.record.bridgeDir).catch(() => []) : [];
+	return buildAgentActivitySnapshot(status, events, { quietThresholdMs });
+}
+
+export function formatAgentActivitySnapshot(snapshot: AgentActivitySnapshot): string[] {
+	return [
+		`agentId: ${snapshot.agentId}`,
+		`activityState: ${snapshot.activityState}`,
+		`effectiveStatus: ${snapshot.effectiveStatus}`,
+		`bridgeSettlementState: ${snapshot.bridgeSettlementState}`,
+		`hasSession: ${snapshot.hasSession ? "true" : "false"}`,
+		snapshot.quietForMs !== undefined ? `quietForMs: ${snapshot.quietForMs}` : undefined,
+		snapshot.lastBridgeEventAt ? `lastBridgeEventAt: ${snapshot.lastBridgeEventAt}` : undefined,
+		snapshot.lastBridgeEventType ? `lastBridgeEventType: ${snapshot.lastBridgeEventType}` : undefined,
+		snapshot.lastBridgeEventSummary ? `lastBridgeEventSummary: ${snapshot.lastBridgeEventSummary}` : undefined,
+		snapshot.lastChildReportAt ? `lastChildReportAt: ${snapshot.lastChildReportAt}` : undefined,
+		snapshot.lastParentMessageAt ? `lastParentMessageAt: ${snapshot.lastParentMessageAt}` : undefined,
+		snapshot.lastTerminalEventAt ? `lastTerminalEventAt: ${snapshot.lastTerminalEventAt}` : undefined,
+	].filter((line): line is string => Boolean(line));
 }
 
 async function readJsonFile<T>(filePath: string, fallback: T): Promise<T> {

@@ -2,7 +2,7 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 
 export const PIMUX_PARAMS = Type.Object({
-	action: StringEnum(["spawn", "open", "list", "tree", "status", "capture", "send_message", "report_parent", "kill", "prune"] as const),
+	action: StringEnum(["spawn", "open", "list", "tree", "status", "activity", "ping_agent", "capture", "send_message", "report_parent", "kill", "prune"] as const),
 	target: Type.Optional(Type.String({ description: "Target agent ID, session name, or 'last'" })),
 	agentId: Type.Optional(Type.String({ description: "Preferred agent ID when spawning" })),
 	cwd: Type.Optional(Type.String({ description: "Working directory for a spawned agent" })),

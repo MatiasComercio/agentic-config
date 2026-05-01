@@ -560,7 +560,7 @@ def test_successful_spawn_transitions_lock_to_post_spawn_supervision() -> None:
     )
     assert blocked_status == {
         "allow": False,
-        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
+        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
     }
 
     blocked_read = run_runtime(
@@ -589,7 +589,7 @@ def test_post_spawn_blocks_happy_path_verification_checks_until_watchdog() -> No
     )
     assert blocked_status == {
         "allow": False,
-        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
+        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
     }
 
     watchdog_status = run_runtime(
@@ -618,7 +618,7 @@ def test_capture_and_open_are_recovery_only_after_spawn() -> None:
         )
         assert blocked == {
             "allow": False,
-            "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
+            "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
         }
 
 
@@ -668,7 +668,7 @@ def test_child_activity_rearms_one_recovery_message_not_polling_tools() -> None:
     )
     assert blocked_status == {
         "allow": False,
-        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
+        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
     }
 
     allowed_message = run_runtime(
@@ -778,7 +778,7 @@ def test_terminal_settlement_rearms_one_final_status_only() -> None:
     )
     assert blocked_second_status == {
         "allow": False,
-        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
+        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
     }
 
 
@@ -824,7 +824,7 @@ def test_inactivity_watchdog_allows_one_follow_up_check_without_restarting_polli
     )
     assert blocked_again == {
         "allow": False,
-        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
+        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
     }
 
 
@@ -899,7 +899,7 @@ def test_no_polling_supervision_blocks_routine_pimux_inspection_after_spawn() ->
     )
     assert blocked_status == {
         "allow": False,
-        "reason": "pimux no-polling supervision is active. Do not poll pimux; wait for delivered child activity. status/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
+        "reason": "pimux no-polling supervision is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
     }
 
     allowed_watchdog_status = run_runtime(

@@ -4,6 +4,14 @@ All notable changes to agentic-config.
 
 ## [Unreleased]
 
+### Added
+
+- `pi-ac-workflow`: add deterministic `pimux activity` checks and correlated `ping_agent` liveness probes for managed agents.
+
+### Changed
+
+- `pi-ac-workflow`: harden `pimux` parent bridge delivery for bursty terminal closeouts with batched notifications, retryable terminal notification state, bridge-delivery reconciliation, and inactivity watchdog alerts.
+
 ## [0.3.0] - 2026-04-30
 
 ### Added

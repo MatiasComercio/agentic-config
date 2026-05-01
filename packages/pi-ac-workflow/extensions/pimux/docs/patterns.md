@@ -16,7 +16,7 @@ Use one child when the task is bounded but should stay long-lived or visually in
 4. let the planner return the execution plan
 
 Do not rely on prose inference between steps; hand off file paths or bounded summaries.
-Do not keep the parent blocked with Bash sleep/wait loops or repeated pings while waiting; inspect only at a real handoff, live-watch request, or suspected problem.
+Do not keep the parent blocked with Bash sleep/wait loops or repeated pings while waiting; inspect only at a real handoff, live-watch request, runtime inactivity watchdog notification, or suspected problem.
 
 ## Team / brainstorm pattern
 
@@ -37,7 +37,7 @@ Use pimux as the control-plane runtime for:
 
 Keep wrappers thin:
 - wrapper skill owns prompt and file conventions
-- pimux owns tmux launch, messaging, settlement, visual supervision, and the fail-closed parent control-plane lock
+- pimux owns tmux launch, messaging, settlement, batched terminal parent delivery, visual supervision, inactivity watchdogs, deterministic activity checks, and the fail-closed parent control-plane lock
 - wrapper-triggered parents do not do repo inspection before spawn; they hand off the user objective and let the child read the repo
 - for `mux-ospec`, explicit spec paths pass through unchanged; inline prompts without a path auto-derive/create the next current-branch spec path through the authoritative runtime; only missing user input falls back to `AskUserQuestion`, never parent-side `Read` / `Bash`
 

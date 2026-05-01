@@ -5,6 +5,7 @@ export type BridgeEventType =
 	| "instruction"
 	| "answer"
 	| "clarification"
+	| "status_request"
 	| "progress"
 	| "question"
 	| "blocker"

@@ -5,7 +5,7 @@ Package-owned runtime protocol docs for the `pimux` extension command, tool, bri
 ## Messaging model
 
 - FIRST: do not poll pimux and do not use Bash sleep/wait loops; wait for delivered child activity.
-- parent -> child: explicit bridge inbox events via `send_message`
+- parent -> child: explicit bridge inbox events via `send_message` or correlated `status_request` probes from `ping_agent`
 - child -> parent: explicit bridge reports via `report_parent`
 - one hop only: L2 reports to L1, L1 reports to L0
 
@@ -31,6 +31,7 @@ Implications:
 
 After a terminal child report, the pimux runtime should finalize the managed session promptly instead of leaving the child alive in an ambiguous post-closeout state.
 The child should not keep chatting or continue work after emitting a terminal report.
+Terminal settlement notification is durable parent-delivery work: bursty terminal reports may be batched, and a terminal notification remains retryable until the parent delivery queue records delivery metadata for that bridge.
 
 ## Nested orchestrator rule
 
@@ -65,14 +66,17 @@ Inspect or intervene only when:
 - the child emits a bridge report
 - the user asks to inspect live progress
 - a real downstream handoff now depends on settlement
+- the runtime inactivity watchdog reports that a child exceeded the quiet threshold
 - there is concrete evidence of a stall, blocker, or protocol problem
 
 For explicit mux-family wrappers, the notify-first default is stricter:
 - child bridge notifications are delivered automatically
 - after spawn, do not call `status`, `capture`, `tree`, `list`, or `open` on the happy path
 - wait for delivered child activity; after a child progress report arrives, use at most one `send_message` when input is needed
-- treat `status`, `capture`, `tree`, `list`, and `open` as recovery-only tools for explicit live inspection, suspected stall/protocol violation/failure, or the inactivity-only watchdog
-- after terminal settlement, use one final `pimux status` check before advancing
+- treat `status`, `activity`, `capture`, `tree`, `list`, and `open` as recovery-only tools for explicit live inspection, suspected stall/protocol violation/failure, or the inactivity-only watchdog
+- use `activity` when deterministic bridge/process state is enough and pane capture is unnecessary
+- use `ping_agent` only as an active recovery probe; the child must answer the `status_request` with `progress` if still working or a terminal report if finished
+- after terminal settlement, use one final `pimux status` or `pimux activity` check before advancing
 
 Do not poll pimux or use Bash sleep/wait loops; wait for delivered child activity. One targeted `status` / `capture` check at a real recovery decision point is fine. Continuous polling is not.
 

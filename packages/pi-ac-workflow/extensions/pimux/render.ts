@@ -92,5 +92,16 @@ export function buildProtocolViolationDeliveryContent(
 }
 
 export function buildChildMessageContent(event: BridgeEvent): string {
+	if (event.type === "status_request") {
+		const message = event.message?.trim() || event.summary?.trim() || "Status requested.";
+		return [
+			message,
+			"",
+			"pimux status_request response contract:",
+			"- If still working, call pimux report_parent with reportKind=progress and include the request id in the summary.",
+			"- If the work is complete, call pimux report_parent with reportKind=closeout.",
+			"- If terminally blocked or failed, call report_parent with reportKind=blocker or reportKind=failure.",
+		].join("\n");
+	}
 	return event.message?.trim() || event.summary?.trim() || "";
 }

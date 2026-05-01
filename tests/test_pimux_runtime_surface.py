@@ -23,6 +23,54 @@ def test_parent_runtime_auto_finalizes_terminal_child_reports() -> None:
     assert "events = await finalizeManagedAgentAfterTerminalReport(launch, ctx);" in text
 
 
+def test_parent_runtime_batches_and_retries_terminal_delivery() -> None:
+    """Terminal closeout notification should go through a durable batched parent queue."""
+    index_text = PIMUX_INDEX.read_text()
+    bridge_text = PIMUX_BRIDGE.read_text()
+    assert "interface QueuedParentDelivery" in index_text
+    assert "const parentDeliveryQueue = new Map<string, QueuedParentDelivery>();" in index_text
+    assert "const buildParentDeliveryBatchContent" in index_text
+    assert "# pimux reports: ${deliveries.length} updates" in index_text
+    assert "terminalNotificationDeliveredAt" in bridge_text
+    assert "terminalNotificationAttemptCount" in bridge_text
+    assert "!notificationDelivered" in index_text
+    assert "key: `settlement:${bridgeDir}:${settlement.terminalEvent?.eventId ?? settlement.settledState}`" in index_text
+    assert "const processingParentBridges = new Map<string, ParentBridgeProcessingState>();" in index_text
+    assert "existing.rerunRequested = true;" in index_text
+
+
+def test_activity_and_ping_agent_surface_is_available() -> None:
+    """pimux should expose deterministic activity checks and active status probes."""
+    index_text = PIMUX_INDEX.read_text()
+    schema_text = (PIMUX_PACKAGE_DIR / "schema.ts").read_text()
+    settlement_text = (PIMUX_PACKAGE_DIR / "settlement.ts").read_text()
+    registry_text = PIMUX_REGISTRY.read_text()
+    render_text = PIMUX_RENDER.read_text()
+    assert '"activity"' in schema_text
+    assert '"ping_agent"' in schema_text
+    assert 'case "activity": {' in index_text
+    assert "async function resolveManagedAgentStatus(" in index_text
+    assert "const status = await resolveManagedAgentStatus(ctx, target);" in index_text
+    assert 'case "ping_agent": {' in index_text
+    assert 'case "ping": {' in index_text
+    assert 'type: "status_request"' in index_text
+    assert '| "status_request"' in settlement_text
+    assert "buildAgentActivitySnapshot" in registry_text
+    assert "formatAgentActivitySnapshot" in registry_text
+    assert "pimux status_request response contract" in render_text
+
+
+def test_runtime_has_inactivity_watchdog_monitor() -> None:
+    """The extension should perform background reconciliation and inactivity watchdog notification."""
+    text = PIMUX_INDEX.read_text()
+    assert "BACKGROUND_MONITOR_INTERVAL_MS" in text
+    assert "processInactivityWatchdog" in text
+    assert "pimux inactivity watchdog" in text
+    assert "ensureBackgroundMonitor(ctx);" in text
+    assert "void reconcileParentBridgeWatchers(ctx);" in text
+    assert "void processInactivityWatchdog(ctx);" in text
+
+
 def test_ui_selectors_render_string_labels_instead_of_objects() -> None:
     """The open/tree pickers should pass display strings to ctx.ui.select."""
     text = PIMUX_INDEX.read_text()
@@ -121,7 +169,7 @@ def test_parent_control_plane_lock_is_extension_enforced() -> None:
     assert 'CONTROL_PLANE_INACTIVITY_WATCHDOG_MS' in helper_text
     assert 'Do not poll pimux; wait for delivered child activity.' in helper_text
     assert 'Do not use Bash sleep/wait loops for supervision' in helper_text
-    assert 'status/capture/tree/list/open are recovery-only' in helper_text
+    assert 'status/activity/capture/tree/list/open are recovery-only' in helper_text
     assert 'Wait for a delivered child report before sending messages' in helper_text
     assert 'A recovery send_message already went out for the current activity window.' in helper_text
     assert 'Terminal settlement is ready. Use one final pimux status check, then stop supervising this child.' in helper_text
