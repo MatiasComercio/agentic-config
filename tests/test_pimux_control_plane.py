@@ -710,8 +710,8 @@ def test_child_activity_rearms_one_recovery_message_not_polling_tools() -> None:
 
 
 
-def test_terminal_settlement_rearms_one_final_status_only() -> None:
-    """Terminal settlement should allow one final status verification, not more capture or nudges."""
+def test_terminal_settlement_rearms_one_final_status_or_activity_only() -> None:
+    """Terminal settlement should allow one final status/activity verification, not capture or nudges."""
     post_spawn = spawn_post_lock()
     settled = run_runtime(
         {
@@ -731,7 +731,15 @@ def test_terminal_settlement_rearms_one_final_status_only() -> None:
             "event": {"toolName": "pimux", "input": {"action": "status", "target": "mux-ospec-stage-001"}},
         }
     )
+    allowed_activity = run_runtime(
+        {
+            "action": "evaluate",
+            "lock": settled,
+            "event": {"toolName": "pimux", "input": {"action": "activity", "target": "mux-ospec-stage-001"}},
+        }
+    )
     assert allowed_status == {"allow": True}
+    assert allowed_activity == {"allow": True}
 
     blocked_capture = run_runtime(
         {
@@ -742,7 +750,7 @@ def test_terminal_settlement_rearms_one_final_status_only() -> None:
     )
     assert blocked_capture == {
         "allow": False,
-        "reason": "Explicit mux-ospec parent is control-plane locked. Terminal settlement is ready. Use one final pimux status check, then stop supervising this child.",
+        "reason": "Explicit mux-ospec parent is control-plane locked. Terminal settlement is ready. Use one final pimux status or activity check, then stop supervising this child.",
     }
 
     blocked_message = run_runtime(
@@ -757,7 +765,7 @@ def test_terminal_settlement_rearms_one_final_status_only() -> None:
     )
     assert blocked_message == {
         "allow": False,
-        "reason": "Explicit mux-ospec parent is control-plane locked. Terminal settlement is ready. Use one final pimux status check, then stop supervising this child.",
+        "reason": "Explicit mux-ospec parent is control-plane locked. Terminal settlement is ready. Use one final pimux status or activity check, then stop supervising this child.",
     }
 
     after_final_status = run_runtime(
@@ -768,6 +776,15 @@ def test_terminal_settlement_rearms_one_final_status_only() -> None:
             "now": "2026-04-17T10:03:05Z",
         }
     )
+    after_final_activity = run_runtime(
+        {
+            "action": "update_tool_result",
+            "lock": settled,
+            "event": {"toolName": "pimux", "details": {"action": "activity"}, "isError": False},
+            "now": "2026-04-17T10:03:05Z",
+        }
+    )
+    assert after_final_activity["settlementVerificationPending"] is False
     blocked_second_status = run_runtime(
         {
             "action": "evaluate",
@@ -940,8 +957,8 @@ def test_no_polling_supervision_blocks_bash_sleep_wait_loops_but_allows_normal_c
     assert allowed_git == {"allow": True}
 
 
-def test_no_polling_supervision_allows_one_final_status_after_terminal_settlement() -> None:
-    """Terminal settlement should reopen exactly one final status check for verification."""
+def test_no_polling_supervision_allows_one_final_status_or_activity_after_terminal_settlement() -> None:
+    """Terminal settlement should reopen exactly one final status/activity check for verification."""
     supervision = no_polling_supervision()
     settled = run_runtime(
         {
@@ -961,7 +978,15 @@ def test_no_polling_supervision_allows_one_final_status_after_terminal_settlemen
             "event": {"toolName": "pimux", "input": {"action": "status", "target": "pimux-worker-001"}},
         }
     )
+    allowed_activity = run_runtime(
+        {
+            "action": "evaluate_no_polling_supervision",
+            "supervision": settled,
+            "event": {"toolName": "pimux", "input": {"action": "activity", "target": "pimux-worker-001"}},
+        }
+    )
     assert allowed_status == {"allow": True}
+    assert allowed_activity == {"allow": True}
 
     after_status = run_runtime(
         {
@@ -971,7 +996,16 @@ def test_no_polling_supervision_allows_one_final_status_after_terminal_settlemen
             "now": "2026-04-17T10:03:05Z",
         }
     )
+    after_activity = run_runtime(
+        {
+            "action": "no_polling_tool_result",
+            "supervision": settled,
+            "event": {"toolName": "pimux", "details": {"action": "activity"}, "isError": False},
+            "now": "2026-04-17T10:03:05Z",
+        }
+    )
     assert after_status["active"] is False
+    assert after_activity["active"] is False
     allowed_after_supervision = run_runtime(
         {
             "action": "evaluate_no_polling_supervision",

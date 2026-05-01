@@ -27,7 +27,8 @@ def test_parent_runtime_batches_and_retries_terminal_delivery() -> None:
     """Terminal closeout notification should go through a durable batched parent queue."""
     index_text = PIMUX_INDEX.read_text()
     bridge_text = PIMUX_BRIDGE.read_text()
-    assert "interface QueuedParentDelivery" in index_text
+    parent_delivery_text = (PIMUX_PACKAGE_DIR / "parent-delivery.ts").read_text()
+    assert "interface QueuedParentDelivery" in parent_delivery_text
     assert "const parentDeliveryQueue = new Map<string, QueuedParentDelivery>();" in index_text
     assert "const buildParentDeliveryBatchContent" in index_text
     assert "# pimux reports: ${deliveries.length} updates" in index_text
@@ -43,16 +44,20 @@ def test_parent_delivery_ack_happens_after_successful_send() -> None:
     """Deliverable bridge events should not be durably acknowledged before sendMessage succeeds."""
     index_text = PIMUX_INDEX.read_text()
     bridge_text = PIMUX_BRIDGE.read_text()
+    parent_delivery_text = (PIMUX_PACKAGE_DIR / "parent-delivery.ts").read_text()
     deliverable_block = index_text.split("if (shouldDeliverBridgeEventToParent(event)) {", 1)[1].split(
         "} else if (!terminalReport) {",
         1,
     )[0]
     assert "enqueueParentDelivery(" in deliverable_block
     assert "delivered.add(event.eventId)" not in deliverable_block
-    assert "const markParentDeliveriesDelivered = async (deliveries: QueuedParentDelivery[]): Promise<void> => {" in index_text
+    assert "await flushQueuedParentDeliveries({" in index_text
+    assert "markParentDeliveriesDelivered," in index_text
+    assert "sendParentMessage:" in index_text
+    assert "await options.markParentDeliveriesDelivered(deliveries);" in parent_delivery_text
+    assert "await options.updateTerminalNotificationState(deliveries, batchId, \"delivered\");" in parent_delivery_text
     assert "eventIds.push(...delivery.eventIds);" in index_text
     assert "parentState.deliveredEventIds = [...delivered].slice(-500);" in index_text
-    assert "await markParentDeliveriesDelivered(deliveries);\n\t\t\tawait updateTerminalNotificationState(deliveries, batchId, \"delivered\");" in index_text
     assert "deliveredEventIds: uniqueStrings([...(current.deliveredEventIds ?? []), ...(next.deliveredEventIds ?? [])]).slice(-500)," in bridge_text
 
 
@@ -75,6 +80,7 @@ def test_activity_and_ping_agent_surface_is_available() -> None:
     assert "buildAgentActivitySnapshot" in registry_text
     assert "formatAgentActivitySnapshot" in registry_text
     assert "pimux status_request response contract" in render_text
+    assert 'throw new Error("ping requires target")' not in index_text
 
 
 def test_runtime_has_inactivity_watchdog_monitor() -> None:
@@ -191,11 +197,11 @@ def test_parent_control_plane_lock_is_extension_enforced() -> None:
     assert 'status/activity/capture/tree/list/open are recovery-only' in helper_text
     assert 'Wait for a delivered child report before sending messages' in helper_text
     assert 'A recovery send_message already went out for the current activity window.' in helper_text
-    assert 'Terminal settlement is ready. Use one final pimux status check, then stop supervising this child.' in helper_text
+    assert 'Terminal settlement is ready. Use one final pimux status or activity check, then stop supervising this child.' in helper_text
     assert 'PIMUX HAPPY-PATH DISCIPLINE: this run is notify-first, not poll-first.' in helper_text
     assert 'FIRST: do not poll pimux and do not use Bash sleep/wait loops; wait for delivered child activity.' in helper_text
     assert 'Allowed happy-path sequence: spawn -> wait for child report -> send_message once if needed -> wait for closeout -> final status verification.' in helper_text
-    assert 'after terminal settlement, use one final pimux status check before advancing.' in helper_text
+    assert 'after terminal settlement, use one final pimux status or activity check before advancing.' in helper_text
     assert 'Progress is non-terminal; question is terminal waiting-on-parent settlement.' in text
     assert 'For same-session child questions that must continue, use report_parent(progress, requiresResponse=true), not question.' in text
     assert 'For same-session parent input that you need before continuing, emit progress with requiresResponse=true.' in bridge_text

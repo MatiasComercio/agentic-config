@@ -89,6 +89,13 @@ import {
 	type PruneMode,
 	type ResolvedStatus,
 } from "./registry.ts";
+import {
+	flushQueuedParentDeliveries,
+	hasDeliveredTerminalNotification,
+	shouldNotifyInactivityWatchdog,
+	shouldSendStatusRequestProbe,
+	type QueuedParentDelivery,
+} from "./parent-delivery.ts";
 import { PIMUX_PARAMS } from "./schema.ts";
 import {
 	DEFAULT_CAPTURE_LINES,
@@ -114,7 +121,6 @@ import {
 	shouldDeliverBridgeEventToParent,
 	shouldTriggerTurnForEvent,
 	shouldTriggerTurnForSettledState,
-	type SettledTerminalState,
 } from "./settlement.ts";
 import {
 	buildSessionName,
@@ -152,18 +158,6 @@ interface ReportParentRequest {
 	summary: string;
 	reportMarkdown?: string;
 	requiresResponse?: boolean;
-}
-
-interface QueuedParentDelivery {
-	key: string;
-	bridgeDir: string;
-	launch: BridgeLaunchFile;
-	content: string;
-	triggerTurn: boolean;
-	eventIds: string[];
-	terminalEventId?: string;
-	settledState?: SettledTerminalState;
-	createdAt: string;
 }
 
 interface ParentBridgeProcessingState {
@@ -645,7 +639,7 @@ async function pingManagedAgent(
 	message?: string,
 ): Promise<{ status: ResolvedStatus; activity: Awaited<ReturnType<typeof resolveAgentActivitySnapshot>>; requestId?: string; event?: BridgeEvent }> {
 	const result = await activityManagedAgent(ctx, target);
-	if (result.activity.bridgeSettlementState !== "running" || result.activity.activityState === "terminated" || result.activity.activityState === "missing_session") {
+	if (!shouldSendStatusRequestProbe(result.activity)) {
 		return result;
 	}
 	const record = result.status.record;
@@ -1364,35 +1358,32 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 
 	const flushParentDeliveryQueue = async (ctx: ExtensionContext): Promise<void> => {
 		parentDeliveryFlushTimer = undefined;
-		if (parentDeliveryQueue.size === 0) return;
-		const deliveries = [...parentDeliveryQueue.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.key.localeCompare(right.key));
-		parentDeliveryQueue.clear();
-		const batchId = `pimux-batch-${randomUUID()}`;
-		await updateTerminalNotificationState(deliveries, batchId, "queued");
-		try {
-			pi.sendMessage(
-				{
-					customType: "pimux-report",
-					content: buildParentDeliveryBatchContent(deliveries, batchId),
-					display: true,
-					details: { batchId, deliveries },
-				},
-				deliveries.some((delivery) => delivery.triggerTurn)
-					? { triggerTurn: true, deliverAs: "followUp" }
-					: { triggerTurn: false },
-			);
-			await markParentDeliveriesDelivered(deliveries);
-			await updateTerminalNotificationState(deliveries, batchId, "delivered");
-		} catch (error) {
-			for (const delivery of deliveries) parentDeliveryQueue.set(delivery.key, delivery);
-			if (!parentDeliveryFlushTimer) {
+		await flushQueuedParentDeliveries({
+			queue: parentDeliveryQueue,
+			makeBatchId: () => `pimux-batch-${randomUUID()}`,
+			updateTerminalNotificationState,
+			markParentDeliveriesDelivered,
+			sendParentMessage: (batchId, deliveries) => {
+				pi.sendMessage(
+					{
+						customType: "pimux-report",
+						content: buildParentDeliveryBatchContent(deliveries, batchId),
+						display: true,
+						details: { batchId, deliveries },
+					},
+					deliveries.some((delivery) => delivery.triggerTurn)
+						? { triggerTurn: true, deliverAs: "followUp" }
+						: { triggerTurn: false },
+				);
+			},
+			scheduleRetry: () => {
+				if (parentDeliveryFlushTimer) return;
 				parentDeliveryFlushTimer = setTimeout(() => {
 					runBackgroundTask(flushParentDeliveryQueue(ctx));
 				}, PARENT_DELIVERY_DEBOUNCE_MS);
 				parentDeliveryFlushTimer.unref?.();
-			}
-			throw error;
-		}
+			},
+		});
 	};
 
 	const enqueueParentDelivery = (delivery: QueuedParentDelivery, ctx: ExtensionContext): void => {
@@ -1471,11 +1462,11 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 				parentState.terminalState === settlement.settledState &&
 				parentState.terminalEventId === settlement.terminalEvent?.eventId &&
 				parentState.protocolViolationReason === settlement.protocolViolationReason;
-			const notificationDelivered =
-				Boolean(parentState.terminalNotificationDeliveredAt) &&
-				parentState.terminalState === settlement.settledState &&
-				parentState.terminalEventId === settlement.terminalEvent?.eventId &&
-				parentState.protocolViolationReason === settlement.protocolViolationReason;
+			const notificationDelivered = hasDeliveredTerminalNotification(parentState, {
+				terminalState: settlement.settledState,
+				terminalEventId: settlement.terminalEvent?.eventId,
+				protocolViolationReason: settlement.protocolViolationReason,
+			});
 			if (!alreadyObserved) {
 				parentState.terminalState = settlement.settledState;
 				parentState.terminalEventId = settlement.terminalEvent?.eventId;
@@ -1591,10 +1582,15 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 			if (status.bridgeSettlementState && status.bridgeSettlementState !== "running") continue;
 			if (!status.record.bridgeDir || !status.record.launchId) continue;
 			const activity = await resolveAgentActivitySnapshot(status, CONTROL_PLANE_INACTIVITY_WATCHDOG_MS);
-			if (activity.activityState !== "running_quiet" || activity.quietForMs === undefined) continue;
 			const lastActivity = activity.lastBridgeEventAt ?? status.record.lastSeenAt ?? status.record.createdAt;
 			const lastNotifiedAt = watchdogNotifiedAtByAgent.get(status.record.agentId);
-			if (lastNotifiedAt && lastNotifiedAt >= lastActivity && Date.now() - Date.parse(lastNotifiedAt) < CONTROL_PLANE_INACTIVITY_WATCHDOG_MS) {
+			if (!shouldNotifyInactivityWatchdog({
+				activity,
+				lastActivity,
+				lastNotifiedAt,
+				nowMs: Date.now(),
+				thresholdMs: CONTROL_PLANE_INACTIVITY_WATCHDOG_MS,
+			})) {
 				continue;
 			}
 			const launch = await readBridgeLaunch(status.record.bridgeDir);
@@ -1963,7 +1959,6 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 					target = selected?.agentId;
 					if (!target) return;
 				}
-				if (!target) throw new Error("ping requires target");
 				const result = await pingManagedAgent(ctx, target, messageParts.join(" "));
 				const lines = result.requestId
 					? [`Sent status_request ${result.requestId} to ${result.status.record.agentId}.`, "", ...formatAgentActivitySnapshot(result.activity)]

@@ -85,6 +85,7 @@ const MUX_OSPEC_MODIFIERS = new Set([
 const POST_SPAWN_ALLOWED_ACTIONS = new Set(["spawn", "status", "activity", "capture", "tree", "list", "send_message", "ping_agent", "open", "kill"]);
 const SUPERVISION_CHECK_ACTIONS = new Set(["status", "activity", "capture", "tree", "list", "open"]);
 const SUPERVISION_RECOVERY_ACTIONS = new Set(["send_message", "ping_agent"]);
+const SETTLEMENT_VERIFICATION_ACTIONS = new Set(["status", "activity"]);
 const UNRESTRICTED_POST_SPAWN_ACTIONS = new Set(["spawn", "kill"]);
 const BASH_WAIT_LOOP_PATTERN = /\b(?:while|until|for)\b[\s\S]*\b(?:sleep|wait)\b/i;
 const BASH_SLEEP_OR_WAIT_PATTERN = /(?:^|[\s;&|()])(?:sleep\s+\d+(?:\.\d+)?|wait)(?:\s|[;&|)]|$)/i;
@@ -442,6 +443,10 @@ function isRecoveryAction(action: string): boolean {
 	return SUPERVISION_RECOVERY_ACTIONS.has(action);
 }
 
+function isSettlementVerificationAction(action: string): boolean {
+	return SETTLEMENT_VERIFICATION_ACTIONS.has(action);
+}
+
 function isTrackedDirectChild(lock: ControlPlaneLockState, agentId?: string): boolean {
 	return !lock.lastSpawnedAgentId || !agentId || lock.lastSpawnedAgentId === agentId;
 }
@@ -558,9 +563,9 @@ export function evaluateNoPollingSupervisionToolCall(
 	if (isPimuxTool(event.toolName)) {
 		const action = String(event.input?.action ?? "").trim();
 		if (!action || !isSupervisionCheckAction(action)) return { allow: true };
-		if (supervision.settlementVerificationPending && action === "status") return { allow: true };
+		if (supervision.settlementVerificationPending && isSettlementVerificationAction(action)) return { allow: true };
 		if (supervision.settlementVerificationPending) {
-			return buildNoPollingReason("Terminal settlement is ready. Use one final pimux status check, then stop supervising this child.");
+			return buildNoPollingReason("Terminal settlement is ready. Use one final pimux status or activity check, then stop supervising this child.");
 		}
 		if (isInactivityWatchdogReached(supervision, now)) return { allow: true };
 		return buildNoPollingReason(
@@ -646,12 +651,12 @@ export function evaluateControlPlaneToolCall(
 	}
 
 	if (lock.settlementVerificationPending) {
-		if (action === "status") {
+		if (isSettlementVerificationAction(action)) {
 			return { allow: true };
 		}
 		return buildNotifyFirstReason(
 			lock,
-			"Terminal settlement is ready. Use one final pimux status check, then stop supervising this child.",
+			"Terminal settlement is ready. Use one final pimux status or activity check, then stop supervising this child.",
 		);
 	}
 
@@ -694,7 +699,7 @@ export function updateNoPollingSupervisionForToolResult(
 	const action = String(event.details?.action ?? "").trim();
 	if (!action || event.isError || typeof event.details?.error === "string") return supervision;
 	const occurredAt = resolveNowIso(now);
-	if (supervision.settlementVerificationPending && action === "status") {
+	if (supervision.settlementVerificationPending && isSettlementVerificationAction(action)) {
 		return {
 			...supervision,
 			active: false,
@@ -741,7 +746,7 @@ export function updateControlPlaneLockForToolResult(
 
 	if (lock.phase !== "post_spawn") return lock;
 
-	if (lock.settlementVerificationPending && action === "status") {
+	if (lock.settlementVerificationPending && isSettlementVerificationAction(action)) {
 		return {
 			...lock,
 			lastSupervisionResetAt: occurredAt,
@@ -932,7 +937,7 @@ export function buildControlPlaneSystemPrompt(lock: ControlPlaneLockState | unde
 		lines.push(
 			`- Use status/activity/capture/tree/list/open only for explicit live inspection, suspected stall/protocol violation/failure, terminal settlement verification, or the ${CONTROL_PLANE_INACTIVITY_WATCHDOG_LABEL} inactivity watchdog.`,
 		);
-		lines.push("- after terminal settlement, use one final pimux status check before advancing.");
+		lines.push("- after terminal settlement, use one final pimux status or activity check before advancing.");
 	}
 	if (lock.mode === "mux-ospec" || lock.mode === "mux-roadmap") {
 		if (lock.specPath) {
