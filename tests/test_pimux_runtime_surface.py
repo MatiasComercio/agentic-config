@@ -39,6 +39,23 @@ def test_parent_runtime_batches_and_retries_terminal_delivery() -> None:
     assert "existing.rerunRequested = true;" in index_text
 
 
+def test_parent_delivery_ack_happens_after_successful_send() -> None:
+    """Deliverable bridge events should not be durably acknowledged before sendMessage succeeds."""
+    index_text = PIMUX_INDEX.read_text()
+    bridge_text = PIMUX_BRIDGE.read_text()
+    deliverable_block = index_text.split("if (shouldDeliverBridgeEventToParent(event)) {", 1)[1].split(
+        "} else if (!terminalReport) {",
+        1,
+    )[0]
+    assert "enqueueParentDelivery(" in deliverable_block
+    assert "delivered.add(event.eventId)" not in deliverable_block
+    assert "const markParentDeliveriesDelivered = async (deliveries: QueuedParentDelivery[]): Promise<void> => {" in index_text
+    assert "eventIds.push(...delivery.eventIds);" in index_text
+    assert "parentState.deliveredEventIds = [...delivered].slice(-500);" in index_text
+    assert "await markParentDeliveriesDelivered(deliveries);\n\t\t\tawait updateTerminalNotificationState(deliveries, batchId, \"delivered\");" in index_text
+    assert "deliveredEventIds: uniqueStrings([...(current.deliveredEventIds ?? []), ...(next.deliveredEventIds ?? [])]).slice(-500)," in bridge_text
+
+
 def test_activity_and_ping_agent_surface_is_available() -> None:
     """pimux should expose deterministic activity checks and active status probes."""
     index_text = PIMUX_INDEX.read_text()

@@ -152,7 +152,7 @@ function mergeBridgeParentState(current: BridgeParentState, next: BridgeParentSt
 	return {
 		...current,
 		...next,
-		deliveredEventIds: uniqueStrings([...(current.deliveredEventIds ?? []), ...(next.deliveredEventIds ?? [])]),
+		deliveredEventIds: uniqueStrings([...(current.deliveredEventIds ?? []), ...(next.deliveredEventIds ?? [])]).slice(-500),
 		terminalEventId: next.terminalEventId ?? current.terminalEventId,
 		terminalFinalizedAt: preferLatestIso(current.terminalFinalizedAt, next.terminalFinalizedAt),
 		terminalObservedAt: preferLatestIso(current.terminalObservedAt, next.terminalObservedAt),

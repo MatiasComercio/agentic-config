@@ -1345,6 +1345,23 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 		}
 	};
 
+	const markParentDeliveriesDelivered = async (deliveries: QueuedParentDelivery[]): Promise<void> => {
+		const eventIdsByBridge = new Map<string, string[]>();
+		for (const delivery of deliveries) {
+			if (delivery.eventIds.length === 0) continue;
+			const eventIds = eventIdsByBridge.get(delivery.bridgeDir) ?? [];
+			eventIds.push(...delivery.eventIds);
+			eventIdsByBridge.set(delivery.bridgeDir, eventIds);
+		}
+		for (const [bridgeDir, eventIds] of eventIdsByBridge.entries()) {
+			const parentState = await readBridgeParentState(bridgeDir).catch(() => ({ deliveredEventIds: [] }));
+			const delivered = new Set(parentState.deliveredEventIds);
+			for (const eventId of eventIds) delivered.add(eventId);
+			parentState.deliveredEventIds = [...delivered].slice(-500);
+			await writeBridgeParentState(bridgeDir, parentState);
+		}
+	};
+
 	const flushParentDeliveryQueue = async (ctx: ExtensionContext): Promise<void> => {
 		parentDeliveryFlushTimer = undefined;
 		if (parentDeliveryQueue.size === 0) return;
@@ -1364,6 +1381,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 					? { triggerTurn: true, deliverAs: "followUp" }
 					: { triggerTurn: false },
 			);
+			await markParentDeliveriesDelivered(deliveries);
 			await updateTerminalNotificationState(deliveries, batchId, "delivered");
 		} catch (error) {
 			for (const delivery of deliveries) parentDeliveryQueue.set(delivery.key, delivery);
@@ -1436,8 +1454,6 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 					},
 					ctx,
 				);
-				delivered.add(event.eventId);
-				changed = true;
 			} else if (!terminalReport) {
 				delivered.add(event.eventId);
 				changed = true;
