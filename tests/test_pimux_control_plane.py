@@ -45,7 +45,7 @@ if (payload.action === "build_lock") {
 }
 
 if (payload.action === "evaluate") {
-  writeJson(runtime.evaluateControlPlaneToolCall(payload.lock, payload.event, payload.now));
+  writeJson(runtime.evaluateControlPlaneToolCall(payload.lock, payload.event, payload.now, payload.context));
   process.exit(0);
 }
 
@@ -70,7 +70,7 @@ if (payload.action === "build_no_polling_supervision") {
 }
 
 if (payload.action === "evaluate_no_polling_supervision") {
-  writeJson(runtime.evaluateNoPollingSupervisionToolCall(payload.supervision, payload.event, payload.now));
+  writeJson(runtime.evaluateNoPollingSupervisionToolCall(payload.supervision, payload.event, payload.now, payload.context));
   process.exit(0);
 }
 
@@ -81,6 +81,11 @@ if (payload.action === "no_polling_tool_result") {
 
 if (payload.action === "no_polling_terminal_settlement") {
   writeJson(runtime.updateNoPollingSupervisionForTerminalSettlement(payload.supervision, payload.event, payload.now));
+  process.exit(0);
+}
+
+if (payload.action === "is_explicit_live_inspection") {
+  writeJson(runtime.isExplicitLiveInspectionRequest(payload.text));
   process.exit(0);
 }
 
@@ -560,7 +565,7 @@ def test_successful_spawn_transitions_lock_to_post_spawn_supervision() -> None:
     )
     assert blocked_status == {
         "allow": False,
-        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
+        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only; open is also allowed when the user explicitly asks to watch live. Other check actions are allowed only after terminal settlement or the 10m inactivity watchdog.",
     }
 
     blocked_read = run_runtime(
@@ -589,7 +594,7 @@ def test_post_spawn_blocks_happy_path_verification_checks_until_watchdog() -> No
     )
     assert blocked_status == {
         "allow": False,
-        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
+        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only; open is also allowed when the user explicitly asks to watch live. Other check actions are allowed only after terminal settlement or the 10m inactivity watchdog.",
     }
 
     watchdog_status = run_runtime(
@@ -618,8 +623,47 @@ def test_capture_and_open_are_recovery_only_after_spawn() -> None:
         )
         assert blocked == {
             "allow": False,
-            "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
+            "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only; open is also allowed when the user explicitly asks to watch live. Other check actions are allowed only after terminal settlement or the 10m inactivity watchdog.",
         }
+
+
+def test_explicit_live_inspection_allows_open_but_not_polling_checks_after_spawn() -> None:
+    """A user request to watch live should allow open only, not status/capture polling."""
+    post_spawn = spawn_post_lock()
+    context = {"explicitLiveInspectionRequested": True}
+    allowed_open = run_runtime(
+        {
+            "action": "evaluate",
+            "lock": post_spawn,
+            "event": {"toolName": "pimux", "input": {"action": "open", "target": "mux-ospec-stage-001"}},
+            "now": "2026-04-17T10:01:00Z",
+            "context": context,
+        }
+    )
+    assert allowed_open == {"allow": True}
+
+    for action in ("status", "capture"):
+        blocked = run_runtime(
+            {
+                "action": "evaluate",
+                "lock": post_spawn,
+                "event": {"toolName": "pimux", "input": {"action": action, "target": "mux-ospec-stage-001"}},
+                "now": "2026-04-17T10:01:00Z",
+                "context": context,
+            }
+        )
+        assert blocked["allow"] is False
+
+
+def test_explicit_live_inspection_detection_is_conservative() -> None:
+    """Live visual inspection intent should require both an open/show verb and a live/tab terminal noun."""
+    assert run_runtime({"action": "is_explicit_live_inspection", "text": "open both live in tabs"}) is True
+    assert run_runtime({"action": "is_explicit_live_inspection", "text": "show me the live agents"}) is True
+    assert run_runtime({"action": "is_explicit_live_inspection", "text": "watch live"}) is True
+    assert run_runtime({"action": "is_explicit_live_inspection", "text": "open in tmux tabs"}) is True
+    assert run_runtime({"action": "is_explicit_live_inspection", "text": "how are they doing?"}) is False
+    assert run_runtime({"action": "is_explicit_live_inspection", "text": "check status"}) is False
+    assert run_runtime({"action": "is_explicit_live_inspection", "text": "any update?"}) is False
 
 
 
@@ -668,7 +712,7 @@ def test_child_activity_rearms_one_recovery_message_not_polling_tools() -> None:
     )
     assert blocked_status == {
         "allow": False,
-        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
+        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only; open is also allowed when the user explicitly asks to watch live. Other check actions are allowed only after terminal settlement or the 10m inactivity watchdog.",
     }
 
     allowed_message = run_runtime(
@@ -795,7 +839,7 @@ def test_terminal_settlement_rearms_one_final_status_or_activity_only() -> None:
     )
     assert blocked_second_status == {
         "allow": False,
-        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
+        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only; open is also allowed when the user explicitly asks to watch live. Other check actions are allowed only after terminal settlement or the 10m inactivity watchdog.",
     }
 
 
@@ -841,7 +885,7 @@ def test_inactivity_watchdog_allows_one_follow_up_check_without_restarting_polli
     )
     assert blocked_again == {
         "allow": False,
-        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
+        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only; open is also allowed when the user explicitly asks to watch live. Other check actions are allowed only after terminal settlement or the 10m inactivity watchdog.",
     }
 
 
@@ -916,7 +960,7 @@ def test_no_polling_supervision_blocks_routine_pimux_inspection_after_spawn() ->
     )
     assert blocked_status == {
         "allow": False,
-        "reason": "pimux no-polling supervision is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the 10m inactivity watchdog.",
+        "reason": "pimux no-polling supervision is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only; open is also allowed when the user explicitly asks to watch live. Other check actions are allowed only after terminal settlement or the 10m inactivity watchdog.",
     }
 
     allowed_watchdog_status = run_runtime(
@@ -928,6 +972,34 @@ def test_no_polling_supervision_blocks_routine_pimux_inspection_after_spawn() ->
         }
     )
     assert allowed_watchdog_status == {"allow": True}
+
+
+def test_no_polling_supervision_allows_explicit_live_open_but_not_polling_checks() -> None:
+    """Generic no-polling supervision should honor explicit live open without allowing polling."""
+    supervision = no_polling_supervision()
+    context = {"explicitLiveInspectionRequested": True}
+    allowed_open = run_runtime(
+        {
+            "action": "evaluate_no_polling_supervision",
+            "supervision": supervision,
+            "event": {"toolName": "pimux", "input": {"action": "open", "target": "pimux-worker-001"}},
+            "now": "2026-04-17T10:01:00Z",
+            "context": context,
+        }
+    )
+    assert allowed_open == {"allow": True}
+
+    for action in ("status", "capture"):
+        blocked = run_runtime(
+            {
+                "action": "evaluate_no_polling_supervision",
+                "supervision": supervision,
+                "event": {"toolName": "pimux", "input": {"action": action, "target": "pimux-worker-001"}},
+                "now": "2026-04-17T10:01:00Z",
+                "context": context,
+            }
+        )
+        assert blocked["allow"] is False
 
 
 def test_no_polling_supervision_blocks_bash_sleep_wait_loops_but_allows_normal_commands() -> None:

@@ -71,9 +71,9 @@ Inspect or intervene only when:
 
 For explicit mux-family wrappers, the notify-first default is stricter:
 - child bridge notifications are delivered automatically
-- after spawn, do not call `status`, `capture`, `tree`, `list`, or `open` on the happy path
+- after spawn, do not call `status`, `activity`, `capture`, `tree`, `list`, or `open` on the happy path, except `open` when the user explicitly asks to watch live
 - wait for delivered child activity; after a child progress report arrives, use at most one `send_message` when input is needed
-- treat `status`, `activity`, `capture`, `tree`, `list`, and `open` as recovery-only tools for explicit live inspection, suspected stall/protocol violation/failure, or the inactivity-only watchdog
+- treat `status`, `activity`, `capture`, `tree`, `list`, and `open` as recovery-only tools for suspected stall/protocol violation/failure or the inactivity-only watchdog; `open` is also allowed for explicit user live-inspection requests
 - use `activity` when deterministic bridge/process state is enough and pane capture is unnecessary
 - use `ping_agent` only as an active recovery probe; the child must answer the `status_request` with `progress` if still working or a terminal report if finished
 - after terminal settlement, use one final `pimux status` or `pimux activity` check before advancing

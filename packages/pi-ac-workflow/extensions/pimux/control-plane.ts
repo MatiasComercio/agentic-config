@@ -92,6 +92,11 @@ const BASH_SLEEP_OR_WAIT_PATTERN = /(?:^|[\s;&|()])(?:sleep\s+\d+(?:\.\d+)?|wait
 const ROADMAP_CONTROL_TOKENS = new Set(["START", "CONTINUE"]);
 export const CONTROL_PLANE_INACTIVITY_WATCHDOG_MS = 10 * 60_000;
 const CONTROL_PLANE_INACTIVITY_WATCHDOG_LABEL = "10m";
+const SUPERVISION_CHECK_RECOVERY_DETAIL = `status/activity/capture/tree/list/open are recovery-only; open is also allowed when the user explicitly asks to watch live. Other check actions are allowed only after terminal settlement or the ${CONTROL_PLANE_INACTIVITY_WATCHDOG_LABEL} inactivity watchdog.`;
+
+export interface ControlPlaneToolContext {
+	explicitLiveInspectionRequested?: boolean;
+}
 
 interface BranchSpecEntry {
 	year: string;
@@ -443,6 +448,10 @@ function isRecoveryAction(action: string): boolean {
 	return SUPERVISION_RECOVERY_ACTIONS.has(action);
 }
 
+function isExplicitOpenAction(action: string, context?: ControlPlaneToolContext): boolean {
+	return action === "open" && context?.explicitLiveInspectionRequested === true;
+}
+
 function isSettlementVerificationAction(action: string): boolean {
 	return SETTLEMENT_VERIFICATION_ACTIONS.has(action);
 }
@@ -553,23 +562,30 @@ function buildRestrictedReason(lock: ControlPlaneLockState, detail: string): str
 	return `Explicit ${lock.mode ?? "mux-family"} parent is control-plane locked. ${detail}`;
 }
 
+export function isExplicitLiveInspectionRequest(text: string | undefined): boolean {
+	const value = String(text ?? "").toLowerCase();
+	return /\b(open|show|watch|view)\b/.test(value) && /\b(live|tab|tabs|iterm|terminal|tmux)\b/.test(value);
+}
+
 export function evaluateNoPollingSupervisionToolCall(
 	supervision: NoPollingSupervisionState | undefined,
 	event: { toolName?: string; input?: Record<string, unknown> },
 	now?: string | number,
+	context?: ControlPlaneToolContext,
 ): ControlPlaneToolDecision {
 	if (!supervision?.active) return { allow: true };
 
 	if (isPimuxTool(event.toolName)) {
 		const action = String(event.input?.action ?? "").trim();
 		if (!action || !isSupervisionCheckAction(action)) return { allow: true };
+		if (isExplicitOpenAction(action, context)) return { allow: true };
 		if (supervision.settlementVerificationPending && isSettlementVerificationAction(action)) return { allow: true };
 		if (supervision.settlementVerificationPending) {
 			return buildNoPollingReason("Terminal settlement is ready. Use one final pimux status or activity check, then stop supervising this child.");
 		}
 		if (isInactivityWatchdogReached(supervision, now)) return { allow: true };
 		return buildNoPollingReason(
-			`Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the ${CONTROL_PLANE_INACTIVITY_WATCHDOG_LABEL} inactivity watchdog.`,
+			`Do not poll pimux; wait for delivered child activity. ${SUPERVISION_CHECK_RECOVERY_DETAIL}`,
 		);
 	}
 
@@ -586,6 +602,7 @@ export function evaluateControlPlaneToolCall(
 	lock: ControlPlaneLockState | undefined,
 	event: { toolName?: string; input?: Record<string, unknown> },
 	now?: string | number,
+	context?: ControlPlaneToolContext,
 ): ControlPlaneToolDecision {
 	if (!lock?.active || !lock.mode || !lock.phase) {
 		return { allow: true };
@@ -650,6 +667,10 @@ export function evaluateControlPlaneToolCall(
 		return { allow: true };
 	}
 
+	if (isExplicitOpenAction(action, context)) {
+		return { allow: true };
+	}
+
 	if (lock.settlementVerificationPending) {
 		if (isSettlementVerificationAction(action)) {
 			return { allow: true };
@@ -666,7 +687,7 @@ export function evaluateControlPlaneToolCall(
 		}
 		return buildNotifyFirstReason(
 			lock,
-			`Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only and allowed only after terminal settlement or the ${CONTROL_PLANE_INACTIVITY_WATCHDOG_LABEL} inactivity watchdog.`,
+			`Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. ${SUPERVISION_CHECK_RECOVERY_DETAIL}`,
 		);
 	}
 
@@ -927,15 +948,15 @@ export function buildControlPlaneSystemPrompt(lock: ControlPlaneLockState | unde
 		"- parent may use only pimux, AskUserQuestion, and say while this lock is active.",
 		lock.phase === "pre_spawn"
 			? "- Phase A before first child report: the only allowed pimux action is spawn."
-			: "- Phase B/C after spawn: wait for delivered child reports; send_message/ping_agent only after child activity; status/activity/capture/tree/list/open are recovery-only.",
+			: "- Phase B/C after spawn: wait for delivered child reports; send_message/ping_agent only after child activity; status/activity/capture/tree/list/open are recovery-only, except open when the user explicitly asks to watch live.",
 		"- do not use parent-side Read/Bash/Edit/Write/NotebookEdit/Grep/Glob/web_search/subagent for repo work.",
 	];
 	if (lock.phase === "post_spawn") {
 		lines.push("- PIMUX HAPPY-PATH DISCIPLINE: this run is notify-first, not poll-first.");
-		lines.push("- Do not poll pimux or use Bash sleep/wait loops; wait for delivered child activity, and treat status/activity/capture/tree/list/open as recovery-only.");
+		lines.push("- Do not poll pimux or use Bash sleep/wait loops; wait for delivered child activity, and treat status/activity/capture/tree/list/open as recovery-only; open is also allowed when the user explicitly asks to watch live.");
 		lines.push("- Allowed happy-path sequence: spawn -> wait for child report -> send_message once if needed -> wait for closeout -> final status verification.");
 		lines.push(
-			`- Use status/activity/capture/tree/list/open only for explicit live inspection, suspected stall/protocol violation/failure, terminal settlement verification, or the ${CONTROL_PLANE_INACTIVITY_WATCHDOG_LABEL} inactivity watchdog.`,
+			`- Use status/activity/capture/tree/list/open only for suspected stall/protocol violation/failure, terminal settlement verification, or the ${CONTROL_PLANE_INACTIVITY_WATCHDOG_LABEL} inactivity watchdog; open is also allowed when the user explicitly asks to watch live.`,
 		);
 		lines.push("- after terminal settlement, use one final pimux status or activity check before advancing.");
 	}

@@ -44,6 +44,7 @@ import {
 	buildUnlockedControlPlaneLock,
 	evaluateControlPlaneToolCall,
 	evaluateNoPollingSupervisionToolCall,
+	isExplicitLiveInspectionRequest,
 	normalizeControlPlaneLockState,
 	normalizeNoPollingSupervisionState,
 	parseExplicitControlPlaneTrigger,
@@ -1255,6 +1256,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 	const queuedChildInboxEventIds = new Set<string>();
 	let controlPlaneLock: ControlPlaneLockState | undefined;
 	let noPollingSupervision: NoPollingSupervisionState | undefined;
+	let explicitLiveInspectionRequested = false;
 
 	const persistNoPollingSupervision = (nextState: NoPollingSupervisionState): void => {
 		noPollingSupervision = nextState;
@@ -2056,6 +2058,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 	};
 
 	pi.on("input", async (event, ctx) => {
+		explicitLiveInspectionRequested = isExplicitLiveInspectionRequest(event.text);
 		if (getCurrentEnv().agentId) {
 			return { action: "continue" as const };
 		}
@@ -2085,10 +2088,11 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 
 	pi.on("tool_call", async (event, ctx) => {
 		const currentLock = getParentControlPlaneLock(ctx, controlPlaneLock);
+		const toolContext = { explicitLiveInspectionRequested };
 		const decision = evaluateControlPlaneToolCall(currentLock, {
 			toolName: event.toolName,
 			input: event.input as Record<string, unknown> | undefined,
-		});
+		}, undefined, toolContext);
 		if (!decision.allow) {
 			return {
 				block: true,
@@ -2098,7 +2102,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 		const supervisionDecision = evaluateNoPollingSupervisionToolCall(noPollingSupervision, {
 			toolName: event.toolName,
 			input: event.input as Record<string, unknown> | undefined,
-		});
+		}, undefined, toolContext);
 		if (!supervisionDecision.allow) {
 			return {
 				block: true,
@@ -2277,7 +2281,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 			"Default to headless agents unless the user explicitly wants to watch live.",
 			"Use send_message for parent-to-child messaging and report_parent for child-to-parent reporting.",
 			"Use activity for deterministic no-capture state checks; use ping_agent to request a correlated child liveness response.",
-			"Treat status/activity/capture/tree/list/open as recovery-only after spawn; do not inspect routine progress.",
+			"Treat status/activity/capture/tree/list/open as recovery-only after spawn; open is allowed when the user explicitly asks to watch live.",
 			"Use report_parent only from the authoritative direct pimux child session. Local helpers are local-only and must not call pimux or report_parent.",
 			"Success settles only after closeout plus child exit. Progress is non-terminal; question is terminal waiting-on-parent settlement.",
 			"For same-session child questions that must continue, use report_parent(progress, requiresResponse=true), not question.",
