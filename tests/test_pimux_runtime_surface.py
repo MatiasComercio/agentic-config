@@ -67,8 +67,10 @@ def test_runtime_has_inactivity_watchdog_monitor() -> None:
     assert "processInactivityWatchdog" in text
     assert "pimux inactivity watchdog" in text
     assert "ensureBackgroundMonitor(ctx);" in text
-    assert "void reconcileParentBridgeWatchers(ctx);" in text
-    assert "void processInactivityWatchdog(ctx);" in text
+    assert "function runBackgroundTask(task: Promise<void>): void" in text
+    assert "runBackgroundTask(processBridgeDeliveries(bridgeDir, getSessionKey(ctx), ctx));" in text
+    assert "runBackgroundTask(reconcileParentBridgeWatchers(ctx));" in text
+    assert "runBackgroundTask(processInactivityWatchdog(ctx));" in text
 
 
 def test_ui_selectors_render_string_labels_instead_of_objects() -> None:

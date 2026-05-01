@@ -1163,6 +1163,14 @@ const NO_POLLING_SPAWN_ECHO = "NO-POLL: do not poll pimux or use Bash sleep/wait
 const PARENT_DELIVERY_DEBOUNCE_MS = 75;
 const BACKGROUND_MONITOR_INTERVAL_MS = 30_000;
 
+function logBackgroundError(error: unknown): void {
+	console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+}
+
+function runBackgroundTask(task: Promise<void>): void {
+	void task.catch(logBackgroundError);
+}
+
 function filterAvailableTools(pi: ExtensionAPI, requestedTools: string[]): string[] {
 	const available = new Set(pi.getAllTools().map((tool) => tool.name));
 	return requestedTools.filter((name, index) => requestedTools.indexOf(name) === index && available.has(name));
@@ -1361,7 +1369,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 			for (const delivery of deliveries) parentDeliveryQueue.set(delivery.key, delivery);
 			if (!parentDeliveryFlushTimer) {
 				parentDeliveryFlushTimer = setTimeout(() => {
-					void flushParentDeliveryQueue(ctx).catch((flushError) => console.error(flushError));
+					runBackgroundTask(flushParentDeliveryQueue(ctx));
 				}, PARENT_DELIVERY_DEBOUNCE_MS);
 				parentDeliveryFlushTimer.unref?.();
 			}
@@ -1373,7 +1381,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 		parentDeliveryQueue.set(delivery.key, delivery);
 		if (parentDeliveryFlushTimer) return;
 		parentDeliveryFlushTimer = setTimeout(() => {
-			void flushParentDeliveryQueue(ctx).catch((error) => console.error(error));
+			runBackgroundTask(flushParentDeliveryQueue(ctx));
 		}, PARENT_DELIVERY_DEBOUNCE_MS);
 		parentDeliveryFlushTimer.unref?.();
 	};
@@ -1538,7 +1546,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 		if (parentBridgeWatchers.has(bridgeDir)) return;
 		await fs.mkdir(getBridgeSignalsDir(bridgeDir), { recursive: true });
 		const watcher = watchFs(getBridgeSignalsDir(bridgeDir), { persistent: false }, () => {
-			void processBridgeDeliveries(bridgeDir, getSessionKey(ctx), ctx);
+			runBackgroundTask(processBridgeDeliveries(bridgeDir, getSessionKey(ctx), ctx));
 		});
 		parentBridgeWatchers.set(bridgeDir, watcher);
 	};
@@ -1609,8 +1617,8 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 	const ensureBackgroundMonitor = (ctx: ExtensionContext): void => {
 		if (backgroundMonitorTimer) return;
 		backgroundMonitorTimer = setInterval(() => {
-			void reconcileParentBridgeWatchers(ctx);
-			void processInactivityWatchdog(ctx);
+			runBackgroundTask(reconcileParentBridgeWatchers(ctx));
+			runBackgroundTask(processInactivityWatchdog(ctx));
 		}, BACKGROUND_MONITOR_INTERVAL_MS);
 		backgroundMonitorTimer.unref?.();
 	};
@@ -1674,7 +1682,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 		if (!childBridgeWatcher) {
 			await fs.mkdir(getBridgeSignalsDir(currentEnv.bridgeDir), { recursive: true });
 			childBridgeWatcher = watchFs(getBridgeSignalsDir(currentEnv.bridgeDir), { persistent: false }, () => {
-				void processChildInbox(ctx);
+				runBackgroundTask(processChildInbox(ctx));
 			});
 		}
 		await processChildInbox(ctx);
