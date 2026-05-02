@@ -7,10 +7,14 @@ All notable changes to agentic-config.
 ### Added
 
 - `pi-ac-workflow`: add deterministic `pimux activity` checks and correlated `ping_agent` liveness probes for managed agents.
+- `pi-ac-workflow`: add behavioral parent-delivery coverage for retry, ack ordering, terminal notification dedupe, watchdog throttling, and ping gating.
 
 ### Changed
 
 - `pi-ac-workflow`: harden `pimux` parent bridge delivery for bursty terminal closeouts with batched notifications, retryable terminal notification state, bridge-delivery reconciliation, and inactivity watchdog alerts.
+  - persists parent-delivery acknowledgements only after successful sends and requeues pending deliveries when queued-state persistence or sends fail
+  - allows `pimux activity` as final settlement verification alongside `status`
+  - allows `pimux open` during supervision only when the user explicitly asks to watch live, while routine polling checks remain blocked
 
 ## [0.3.0] - 2026-04-30
 
