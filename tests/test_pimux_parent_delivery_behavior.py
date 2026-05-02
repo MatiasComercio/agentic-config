@@ -28,6 +28,7 @@ if (payload.action === "flush") {
       makeBatchId: () => "batch-1",
       updateTerminalNotificationState: async (deliveries, batchId, phase) => {
         calls.push({ type: "terminal", phase, batchId, keys: deliveries.map((delivery) => delivery.key) });
+        if (payload.failQueuedState && phase === "queued") throw new Error("queued state failed");
       },
       sendParentMessage: (batchId, deliveries) => {
         calls.push({ type: "send", batchId, keys: deliveries.map((delivery) => delivery.key) });
@@ -117,6 +118,23 @@ def test_flush_requeues_deliveries_when_send_fails() -> None:
     assert set(result["queueKeys"]) == {"a", "b"}
     assert [call["type"] for call in result["calls"]] == ["terminal", "send", "retry"]
     assert not any(call["type"] == "mark" for call in result["calls"])
+
+
+def test_flush_requeues_deliveries_when_queued_state_persistence_fails() -> None:
+    """A failed queued-state write should restore deliveries and schedule retry before send."""
+    result = run_runtime(
+        {
+            "action": "flush",
+            "deliveries": [delivery("b"), delivery("a", created_at="2026-04-17T09:59:00Z")],
+            "failQueuedState": True,
+        }
+    )
+    assert result["ok"] is False
+    assert result["error"] == "queued state failed"
+    assert set(result["queueKeys"]) == {"a", "b"}
+    assert [call["type"] for call in result["calls"]] == ["terminal", "retry"]
+    assert result["calls"][0]["phase"] == "queued"
+    assert not any(call["type"] in {"send", "mark"} for call in result["calls"])
 
 
 def test_flush_marks_delivered_only_after_successful_send() -> None:

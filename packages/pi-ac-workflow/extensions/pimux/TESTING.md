@@ -12,9 +12,9 @@ pytest -q tests/test_pimux_*.py
 
 Latest observed result:
 
-- Date: 2026-04-13
-- Result: `44 passed in 2.29s`
-- Notes: includes the wrapper clean-exit guidance follow-up checks
+- Date: 2026-05-01
+- Result: `93 passed in 9.03s`
+- Notes: includes parent-delivery retry/ack behavior, live-open guard behavior, and wrapper clean-exit guidance checks
 
 ## Automated test coverage
 
@@ -41,6 +41,11 @@ The current pytest surface covers these areas:
   - authoritative child binding rules
 - `tests/test_pimux_notification_surface.py`
   - notification surface behavior
+- `tests/test_pimux_parent_delivery_behavior.py`
+  - parent-delivery flush retry and ack ordering
+  - terminal notification dedupe
+  - inactivity watchdog throttling
+  - `ping_agent` probe gating
 - `tests/test_pimux_skill_surface.py`
   - skill and command-surface expectations
 - terminal delivery hardening checks

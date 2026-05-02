@@ -81,10 +81,10 @@ export async function flushQueuedParentDeliveries<TDelivery extends QueuedParent
 ): Promise<ParentDeliveryFlushResult<TDelivery>> {
 	if (options.queue.size === 0) return { deliveries: [], sent: false };
 	const deliveries = [...options.queue.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.key.localeCompare(right.key));
-	options.queue.clear();
 	const batchId = options.makeBatchId();
-	await options.updateTerminalNotificationState(deliveries, batchId, "queued");
+	options.queue.clear();
 	try {
+		await options.updateTerminalNotificationState(deliveries, batchId, "queued");
 		options.sendParentMessage(batchId, deliveries);
 		await options.markParentDeliveriesDelivered(deliveries);
 		await options.updateTerminalNotificationState(deliveries, batchId, "delivered");
