@@ -11,6 +11,7 @@ Table of contents for agentic-config documentation.
 | [pimux Workflow Topologies](pimux-workflow-topologies.md) | How `pimux`, mux, ospec, and roadmap nest and communicate |
 | [Distribution Guide](distribution.md) | pi git-tag installs, Claude marketplace rollout, dev branch installs, and future npm notes |
 | [Pi Package Adoption Guide](../packages/README.md) | primary git-tag installs, branch-based dev installs, local package-root testing, and future npm distribution notes |
+| [Upstream Pi attribution](upstream-pi-attribution.md) | upstream Pi references and agentic-config package ownership boundaries |
 | [Migration Guide v0.2.0](migration-v0.2.0.md) | Migrate from v0.1.x symlinks to CC-native plugins |
 
 ## Reference

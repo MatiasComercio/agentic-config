@@ -26,7 +26,7 @@ Complete catalog of agentic-config skills organized by plugin.
 | `product-manager` | Decomposes large features into concrete development phases with DAG dependencies |
 
 In pi, canonical shipped IDs are `ac-workflow-mux`, `ac-workflow-mux-ospec`, and `ac-workflow-mux-roadmap`, with user-facing aliases `mux`, `mux-ospec`, and `mux-roadmap`.
-`pimux` remains runtime/tooling only.
+`pimux` remains runtime/tooling only. These are agentic-config package surfaces that run on upstream Pi; see [Upstream Pi attribution](upstream-pi-attribution.md) for the boundary.
 
 ## ac-git (7 skills)
 
@@ -123,4 +123,5 @@ Rules:
 - [Getting Started](getting-started.md) -- Setup and first use
 - [Composition Hierarchy](composition-hierarchy.md) -- L0-L4 layer architecture design doc
 - [pimux Workflow Topologies](pimux-workflow-topologies.md) -- `pimux`, mux, ospec, and roadmap runtime shapes
+- [Upstream Pi attribution](upstream-pi-attribution.md) -- upstream Pi references and agentic-config package ownership boundaries
 - [Distribution Guide](distribution.md) -- Team adoption tiers

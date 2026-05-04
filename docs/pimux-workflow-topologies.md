@@ -1,6 +1,6 @@
 # pimux workflow topologies
 
-This guide describes tmux-backed workflow surfaces shipped by `@agentic-config/pi-ac-workflow`.
+This guide describes tmux-backed workflow surfaces shipped by `@agentic-config/pi-ac-workflow`. These are agentic-config package surfaces that install into upstream Pi. They are not upstream Pi runtime features. See [Upstream Pi attribution](upstream-pi-attribution.md) for the package ownership boundary.
 
 ## Naming contract
 

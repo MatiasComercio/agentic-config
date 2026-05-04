@@ -8,6 +8,8 @@ Setup and first use of agentic-config across pi packages and Claude Code plugins
 - Claude Code CLI with plugin support (`claude plugin install` available) for Claude Code setup
 - Git (for Claude marketplace access and git-based pi installs)
 
+Pi is an upstream project separate from agentic-config. agentic-config packages install into Pi and use upstream Pi APIs where needed. See [Upstream Pi attribution](upstream-pi-attribution.md) for source links and ownership boundaries.
+
 ## Install for pi
 
 The current primary pi install path uses the validated root umbrella package from a git ref.
@@ -268,5 +270,6 @@ Pi:
 - [pimux Workflow Topologies](pimux-workflow-topologies.md) -- `pimux`, mux, ospec, and roadmap runtime guide
 - [Distribution Guide](distribution.md) -- pi git-tag installs, Claude marketplace rollout, dev branch installs, and future npm notes
 - [Pi Package Adoption Guide](../packages/README.md) -- primary git-tag installs, branch-based dev installs, local package-root testing, and future npm distribution notes
+- [Upstream Pi attribution](upstream-pi-attribution.md) -- upstream Pi references and agentic-config package ownership boundaries
 - [Migration Guide v0.2.0](migration-v0.2.0.md) -- Migrate from v0.1.x symlinks
 - [External Specs Storage](external-specs-storage.md) -- Configure external specs repository

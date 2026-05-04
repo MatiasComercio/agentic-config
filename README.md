@@ -53,6 +53,12 @@ Pi is supported today through a validated root umbrella package installable from
 
 For teams, prefer a committed `.pi/settings.json` pinned to a release tag. For local testing and development, use branch refs or direct local package paths as appropriate.
 
+### Upstream Pi attribution
+
+agentic-config ships third-party packages for Pi. Pi itself, including the CLI, package loader, extension API, and runtime, is maintained upstream at [pi.dev](https://pi.dev) and [badlogic/pi-mono](https://github.com/badlogic/pi-mono). The package surface here imports upstream Pi APIs such as [`@mariozechner/pi-coding-agent`](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) and [`@mariozechner/pi-ai`](https://www.npmjs.com/package/@mariozechner/pi-ai) where needed.
+
+See [Upstream Pi attribution](docs/upstream-pi-attribution.md) for source links and the runtime ownership boundary.
+
 Inside `@agentic-config/pi-ac-workflow`, runtime ownership is deliberate: `pimux` is the package-owned tmux control plane, and `ac-workflow-mux`, `ac-workflow-mux-ospec`, and `ac-workflow-mux-roadmap` are structured wrappers on top of it. Generic long-lived tmux work stays on `pimux`; the shipped pi package no longer exposes a separate managed-agent surface.
 
 Quick chooser:
@@ -96,6 +102,7 @@ Core principles:
 - [pimux Workflow Topologies](docs/pimux-workflow-topologies.md) -- `pimux`, mux, ospec, and roadmap hierarchy guide
 - [Distribution Guide](docs/distribution.md) -- pi git-tag installs, Claude marketplace rollout, dev branch installs, and future npm notes
 - [Pi Package Adoption Guide](packages/README.md) -- primary git-tag installs, branch-based dev installs, local package-root testing, and future npm distribution notes
+- [Upstream Pi attribution](docs/upstream-pi-attribution.md) -- upstream Pi references and agentic-config package ownership boundaries
 - [Migration Guide v0.2.0](docs/migration-v0.2.0.md) -- Migrate from v0.1.x
 - [Uninstall Legacy (v0.1.x)](docs/migration-v0.2.0.md#step-1-remove-old-symlinks) -- Remove legacy symlink wiring
 - [Full Documentation Index](docs/index.md)
