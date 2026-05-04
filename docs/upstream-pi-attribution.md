@@ -4,16 +4,16 @@ agentic-config ships third-party Pi packages, skills, and extensions. Pi itself 
 
 ## Upstream references
 
-| Surface | Reference |
-|---------|-----------|
-| Pi project website | <https://pi.dev> |
-| Pi monorepo | <https://github.com/badlogic/pi-mono> |
-| Pi coding agent npm package | <https://www.npmjs.com/package/@mariozechner/pi-coding-agent> |
-| Pi coding agent source package | <https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent> |
-| Pi AI npm package | <https://www.npmjs.com/package/@mariozechner/pi-ai> |
-| Pi AI source package | <https://github.com/badlogic/pi-mono/tree/main/packages/ai> |
+| Surface | Reference | License |
+|---------|-----------|---------|
+| Pi project website | <https://pi.dev> | MIT for the public upstream packages referenced here |
+| Pi monorepo | <https://github.com/badlogic/pi-mono> | MIT |
+| Pi coding agent npm package | <https://www.npmjs.com/package/@mariozechner/pi-coding-agent> | MIT |
+| Pi coding agent source package | <https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent> | MIT |
+| Pi AI npm package | <https://www.npmjs.com/package/@mariozechner/pi-ai> | MIT |
+| Pi AI source package | <https://github.com/badlogic/pi-mono/tree/main/packages/ai> | MIT |
 
-The upstream package names are listed as their public npm identifiers because agentic-config imports those packages directly in its Pi extension packages.
+The upstream package names are listed as their public npm identifiers because agentic-config imports those packages directly in its Pi extension packages. The MIT license entries above are taken from the public package metadata for the referenced upstream packages.
 
 ## Ownership boundary
 
@@ -27,6 +27,12 @@ Important boundaries:
 - `@agentic-config/pi-compat` is an agentic-config compatibility layer for this package set. It is not an upstream Pi package.
 - `ac-workflow-mux`, `ac-workflow-mux-ospec`, and `ac-workflow-mux-roadmap` are agentic-config workflow wrappers built on the package-owned `pimux` runtime.
 - References to "Pi packages" in this repository mean packages that install into Pi through `pi install`, not packages owned by the upstream Pi project unless explicitly named as upstream.
+
+## License boundary
+
+The upstream Pi packages referenced here are MIT licensed. agentic-config is also MIT licensed, but its `@agentic-config/pi-*` packages are separate third-party packages that install into upstream Pi.
+
+If this repository starts copying or bundling upstream Pi source files or assets directly, add the upstream MIT license notice alongside those copied materials. For the current direct-import and documentation-reference usage, this attribution page records the upstream license type and boundary.
 
 ## Direct upstream dependencies in this repository
 

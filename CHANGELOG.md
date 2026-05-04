@@ -6,7 +6,7 @@ All notable changes to agentic-config.
 
 ### Added
 
-- Docs: add upstream Pi attribution, including `pi.dev`, `badlogic/pi-mono`, `@mariozechner/pi-coding-agent`, and `@mariozechner/pi-ai` references plus package ownership boundaries.
+- Docs: add upstream Pi attribution, including `pi.dev`, `badlogic/pi-mono`, `@mariozechner/pi-coding-agent`, and `@mariozechner/pi-ai` references, MIT license notes, and package ownership boundaries.
 - `pi-ac-workflow`: add deterministic `pimux activity` checks and correlated `ping_agent` liveness probes for managed agents.
 - `pi-ac-workflow`: add behavioral parent-delivery coverage for retry, ack ordering, terminal notification dedupe, watchdog throttling, and ping gating.
 
