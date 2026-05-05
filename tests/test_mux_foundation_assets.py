@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import subprocess
 import sys
@@ -46,6 +47,21 @@ def parse_output_value(stdout: str, key: str) -> str:
 def parse_session_dir(stdout: str) -> str:
     """Extract the relative session directory from session.py output."""
     return parse_output_value(stdout, "SESSION_DIR")
+
+
+def load_tool_module(script_path: Path, module_name: str) -> Any:
+    """Load a generated tool module with its sibling imports on sys.path."""
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not load module from: {script_path}")
+    module = importlib.util.module_from_spec(spec)
+    original_path = sys.path.copy()
+    sys.path.insert(0, str(script_path.parent))
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path = original_path
+    return module
 
 
 def parse_json_stdout(result: subprocess.CompletedProcess[str]) -> dict[str, Any]:
@@ -553,6 +569,23 @@ def test_session_initializes_mux_protocol_ledger(tmp_path: Path) -> None:
     assert first_transition["to"] == "LOCK"
 
 
+def test_session_clears_mux_deactivation_marker(tmp_path: Path) -> None:
+    """session.py should clear explicit deactivation before starting a new session."""
+    session_module = load_tool_module(MUX_TOOLS_ROOT / "session.py", "mux_session_marker_test")
+    marker_dir = tmp_path / "outputs" / "session" / "123"
+    marker_path = marker_dir / "mux-deactivated"
+    marker_dir.mkdir(parents=True, exist_ok=True)
+    marker_path.write_text("deactivated_at=2026-05-05T00:00:00+00:00\n")
+
+    try:
+        assert session_module.clear_mux_deactivation(marker_dir) is True
+        assert not marker_path.exists()
+        assert session_module.clear_mux_deactivation(marker_dir) is False
+    finally:
+        if marker_path.exists():
+            marker_path.unlink()
+
+
 def test_session_strict_runtime_writes_activation_artifacts(tmp_path: Path) -> None:
     """session.py should write explicit strict-runtime artifacts only when requested."""
     workspace = create_workspace(tmp_path)
@@ -585,6 +618,19 @@ def test_session_strict_runtime_writes_activation_artifacts(tmp_path: Path) -> N
     assert activation_payload["allowed_write_roots"] == [".specs"]
     assert session_dir_rel not in activation_payload["allowed_write_roots"]
     assert "outputs/session/mux-runtime" not in activation_payload["allowed_write_roots"]
+
+
+def test_deactivate_writes_mux_diagnostics_marker(tmp_path: Path) -> None:
+    """deactivate.py should write the marker consumed by the skill-scoped guard."""
+    workspace = create_workspace(tmp_path)
+    deactivate_result = run_python_script(MUX_TOOLS_ROOT / "deactivate.py", cwd=workspace)
+
+    assert deactivate_result.returncode == 0, deactivate_result.stdout + deactivate_result.stderr
+    assert parse_output_value(deactivate_result.stdout, "MUX_DIAGNOSTICS_ALLOWED") == "true"
+    marker_rel = parse_output_value(deactivate_result.stdout, "MUX_DEACTIVATED_MARKER")
+    marker_path = workspace / marker_rel
+    assert marker_path.exists()
+    assert marker_path.name == "mux-deactivated"
 
 
 def test_deactivate_removes_strict_runtime_artifacts(tmp_path: Path) -> None:

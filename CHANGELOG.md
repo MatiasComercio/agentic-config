@@ -6,6 +6,7 @@ All notable changes to agentic-config.
 
 ### Added
 
+- `ac-workflow`: allow explicit MUX deactivation to stand down skill-scoped Bash guards for diagnostics until the next session starts.
 - Canonical generator: add Claude skill compatibility aliases under `skills/<plugin>/<skill>/SKILL.md` so plugin-qualified skill paths resolve for every generated `ac-*` skill.
 - `pi-ac-workflow`: add `pi-bash.py` and `cc-bash.py` mux worker wrappers for Pi and Claude Code CLI sessions.
 - Docs: add upstream Pi attribution, including `pi.dev`, `badlogic/pi-mono`, `@mariozechner/pi-coding-agent`, and `@mariozechner/pi-ai` references, MIT license notes, and package ownership boundaries.

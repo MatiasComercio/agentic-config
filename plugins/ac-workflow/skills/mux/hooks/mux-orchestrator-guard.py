@@ -24,8 +24,11 @@ Fail-closed: deny operations if hook encounters errors.
 """
 
 import json
+import os
 import re
+import subprocess
 import sys
+from pathlib import Path
 from typing import TypedDict
 
 
@@ -61,6 +64,8 @@ class HookOutput(TypedDict):
 
     hookSpecificOutput: HookSpecificOutput
 
+
+MUX_DEACTIVATED_FILE_NAME = "mux-deactivated"
 
 # Read allowlist: paths orchestrator may read
 READ_ALLOWLIST_PATTERNS = [
@@ -158,9 +163,63 @@ def is_bash_allowed(command: str) -> tuple[bool, str]:
     return False, "Command not in MUX whitelist. Allowed: mkdir -p, uv run tools/*, pi-bash.py wrapper, cc-bash.py wrapper"
 
 
+def find_claude_pid() -> int | None:
+    """Trace up process tree to find claude process PID."""
+    try:
+        pid = os.getpid()
+        for _ in range(10):
+            result = subprocess.run(
+                ["ps", "-o", "pid=,ppid=,comm=", "-p", str(pid)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            line = result.stdout.strip()
+            if not line:
+                break
+            parts = line.split()
+            if len(parts) >= 3:
+                _, ppid, comm = int(parts[0]), int(parts[1]), parts[2]
+                if "claude" in comm.lower():
+                    return pid
+                pid = ppid
+            else:
+                break
+    except Exception:
+        return None
+    return None
+
+
+def find_project_root() -> Path:
+    """Find project root by walking up to .git or CLAUDE.md."""
+    current = Path.cwd()
+    for _ in range(10):
+        if (current / ".git").exists() or (current / "CLAUDE.md").exists():
+            return current
+        if current.parent == current:
+            break
+        current = current.parent
+    return Path.cwd()
+
+
+def is_mux_deactivated(project_root: Path | None = None, claude_pid: int | None = None) -> bool:
+    """Return True when explicit MUX deactivation should disable this guard."""
+    try:
+        root = project_root or find_project_root()
+        pid = claude_pid or find_claude_pid() or os.getpid()
+        marker = root / "outputs" / "session" / str(pid) / MUX_DEACTIVATED_FILE_NAME
+        return marker.exists()
+    except Exception:
+        return False
+
+
 def main() -> None:
     """Main hook execution."""
     try:
+        if is_mux_deactivated():
+            print(json.dumps(make_decision("allow")))
+            return
+
         input_data: HookInput = json.load(sys.stdin)
         tool_name = input_data.get("tool_name", "")
         tool_input: ToolInput = input_data.get("tool_input", {})

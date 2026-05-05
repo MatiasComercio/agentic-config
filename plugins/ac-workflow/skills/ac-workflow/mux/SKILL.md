@@ -377,7 +377,7 @@ When MUX work is complete, deactivate the session:
 uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/deactivate.py
 ```
 
-This cleans up the session marker. Skill-scoped hooks are automatically cleaned up when the skill finishes.
+This cleans up the session marker and writes an explicit deactivation marker. After deactivation, normal diagnostic Bash is allowed until the next `session.py` call clears the marker and re-enters strict MUX mode.
 
 ---
 

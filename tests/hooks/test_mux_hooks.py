@@ -138,6 +138,25 @@ def test_mux_bash_whitelist_matrix() -> None:
     assert not allowed
 
 
+def test_mux_orchestrator_allows_diagnostics_after_deactivation_marker(tmp_path: Path, monkeypatch: Any) -> None:
+    workspace = tmp_path / "workspace"
+    marker_dir = workspace / "outputs" / "session" / "123"
+    marker_dir.mkdir(parents=True)
+    (marker_dir / "mux-deactivated").write_text("deactivated_at=2026-05-05T00:00:00+00:00\n")
+
+    monkeypatch.setattr(MUX_GUARD, "find_project_root", lambda: workspace)
+    monkeypatch.setattr(MUX_GUARD, "find_claude_pid", lambda: 123)
+
+    output = _run_main(
+        MUX_GUARD,
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo test"},
+        },
+    )
+    assert _decision(output) == "allow"
+
+
 def test_mux_orchestrator_denies_read_outside_allowlist() -> None:
     output = _run_main(
         MUX_GUARD,

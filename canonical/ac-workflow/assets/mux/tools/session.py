@@ -50,6 +50,7 @@ STRICT_RUNTIME_VERSION = 1
 STRICT_RUNTIME_FILE_NAME = ".mux-runtime.json"
 STRICT_RUNTIME_REGISTRY_DIR = Path("outputs/session/mux-runtime")
 STRICT_COORDINATOR_ALLOWED_WRITE_ROOTS = [".specs"]
+MUX_DEACTIVATED_FILE_NAME = "mux-deactivated"
 
 
 def find_claude_pid() -> int | None:
@@ -117,6 +118,15 @@ def hash_session_key(session_key: str) -> str:
     return hashlib.sha256(session_key.encode("utf-8")).hexdigest()[:24]
 
 
+def clear_mux_deactivation(marker_dir: Path) -> bool:
+    """Remove any prior explicit deactivation marker before a new session starts."""
+    deactivated_marker = marker_dir / MUX_DEACTIVATED_FILE_NAME
+    if not deactivated_marker.exists():
+        return False
+    deactivated_marker.unlink()
+    return True
+
+
 def activate_mux_enforcement(session_dir: Path) -> Path | None:
     """Create mux-active marker for session observability.
 
@@ -134,6 +144,7 @@ def activate_mux_enforcement(session_dir: Path) -> Path | None:
     project_root = find_project_root()
     marker_dir = project_root / f"outputs/session/{claude_pid}"
     marker_dir.mkdir(parents=True, exist_ok=True)
+    clear_mux_deactivation(marker_dir)
 
     marker_file = marker_dir / "mux-active"
     marker_file.write_text(f"{session_dir}\n{datetime.now().isoformat()}\n")

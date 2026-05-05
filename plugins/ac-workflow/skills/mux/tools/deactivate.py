@@ -29,6 +29,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,7 @@ STRICT_RUNTIME_VERSION = 1
 STRICT_RUNTIME_FILE_NAME = ".mux-runtime.json"
 STRICT_RUNTIME_LEDGER_FILE_NAME = ".mux-ledger.json"
 STRICT_RUNTIME_REGISTRY_DIR = Path("outputs/session/mux-runtime")
+MUX_DEACTIVATED_FILE_NAME = "mux-deactivated"
 
 
 def find_claude_pid() -> int | None:
@@ -77,9 +79,39 @@ def find_project_root() -> Path:
     return Path.cwd()
 
 
+def utc_now_iso() -> str:
+    """Return an RFC-3339-like UTC timestamp."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def to_project_relative(project_root: Path, candidate: Path) -> str:
+    """Render path relative to project root when possible."""
+    try:
+        return str(candidate.resolve().relative_to(project_root.resolve()))
+    except ValueError:
+        return str(candidate.resolve())
+
+
 def hash_session_key(session_key: str) -> str:
     """Return stable bounded hash for a runtime session key."""
     return hashlib.sha256(session_key.encode("utf-8")).hexdigest()[:24]
+
+
+def write_deactivation_marker(project_root: Path, claude_pid: int, session_was: str) -> Path:
+    """Write the explicit marker that lets the skill-scoped guard stand down."""
+    marker_dir = project_root / "outputs" / "session" / str(claude_pid)
+    marker_dir.mkdir(parents=True, exist_ok=True)
+    marker_path = marker_dir / MUX_DEACTIVATED_FILE_NAME
+    marker_path.write_text(
+        "\n".join(
+            [
+                f"deactivated_at={utc_now_iso()}",
+                f"session_was={session_was}",
+            ]
+        )
+        + "\n"
+    )
+    return marker_path
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -210,12 +242,16 @@ def main() -> int:
         marker_file.unlink()
         marker_removed = True
 
+    deactivated_marker = write_deactivation_marker(project_root, claude_pid, marker_session)
+
     print(f"MUX_DEACTIVATED={'true' if marker_removed else 'false'}")
     if marker_removed:
         print(f"SESSION_WAS={marker_session}")
         print("MUX session marker removed. Observability cleanup complete.")
     else:
         print("WARNING: No active mux marker found")
+    print("MUX_DIAGNOSTICS_ALLOWED=true")
+    print(f"MUX_DEACTIVATED_MARKER={to_project_relative(project_root, deactivated_marker)}")
 
     print(f"STRICT_RUNTIME_DEACTIVATED={'true' if strict_deactivated else 'false'}")
     if strict_deactivated:
