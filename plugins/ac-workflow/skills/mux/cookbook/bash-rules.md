@@ -91,7 +91,8 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch \
   --signal-path "$SIGNAL_PATH" \
   --model "$MODEL" \
   --thinking "$THINKING" \
-  --cwd "$PROJECT_ROOT"
+  --cwd "$PROJECT_ROOT" \
+  --stream
 ```
 
 For Claude Code CLI workers:
@@ -108,10 +109,13 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash.py launch \
   --signal-path "$SIGNAL_PATH" \
   --model "$MODEL" \
   --permission-mode "$PERMISSION_MODE" \
-  --cwd "$PROJECT_ROOT"
+  --cwd "$PROJECT_ROOT" \
+  --stream
 ```
 
-`pi-bash.py` and `cc-bash.py` validate the declared report and signal files after the child process exits. They do not require an active MUX ledger session; declare-before-dispatch matching is coordinator policy. See `pi-bash.md` and `cc-bash.md` for optional strict orchestration guidance.
+Operational default: include `--stream` for wrapper launches so live child JSONL events appear in the background Bash task output. Omit it only for low-noise or legacy automation.
+
+`pi-bash.py` and `cc-bash.py` validate the declared report and signal files after the child process exits. They do not require an active MUX ledger session; declare-before-dispatch matching is coordinator policy. With `--stream`, they also persist raw child stdout events to `<SESSION_DIR>/logs/<agent-id>.events.jsonl` and mirror child stdout/stderr to wrapper stderr for live viewing. During active MUX execution, watch the background command output instead of tailing logs; after completion or explicit `deactivate.py`, inspect the events, stdout, and stderr logs for diagnostics. See `pi-bash.md` and `cc-bash.md` for optional strict orchestration guidance.
 
 ## Hook Whitelist Patterns
 

@@ -113,7 +113,7 @@ def test_mux_bash_whitelist_matrix() -> None:
         "uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch tmp/mux/session agent-1 "
         "--role builder --objective objective --scope scope --task task "
         "--report-path tmp/mux/session/reports/agent-1.md "
-        "--signal-path tmp/mux/session/.signals/agent-1.done --model example/model"
+        "--signal-path tmp/mux/session/.signals/agent-1.done --model example/model --stream"
     )
     assert allowed
 
@@ -121,7 +121,7 @@ def test_mux_bash_whitelist_matrix() -> None:
         "uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash.py launch tmp/mux/session agent-1 "
         "--role reviewer --objective objective --scope scope --task task "
         "--report-path tmp/mux/session/reports/agent-1.md "
-        "--signal-path tmp/mux/session/.signals/agent-1.done --model opus"
+        "--signal-path tmp/mux/session/.signals/agent-1.done --model opus --stream"
     )
     assert allowed
 

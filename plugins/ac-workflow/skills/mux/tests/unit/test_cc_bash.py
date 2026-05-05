@@ -37,8 +37,14 @@ def main() -> int:
         prompt = sys.argv[-1] if sys.argv[1:] else ""
     prompt_path.write_text(prompt)
 
-    print("fake claude stdout")
-    print("fake claude stderr", file=sys.stderr)
+    stream_mode = "--output-format" in sys.argv and sys.argv[sys.argv.index("--output-format") + 1] == "stream-json"
+    if stream_mode:
+        print(json.dumps({{"type": "message_start", "message": "hello"}}), flush=True)
+        print(json.dumps({{"type": "tool_use", "name": "Read"}}), flush=True)
+        print("fake claude stream stderr", file=sys.stderr, flush=True)
+    else:
+        print("fake claude stdout")
+        print("fake claude stderr", file=sys.stderr)
 
     if os.environ.get("FAKE_CC_EXIT", "0") != "0":
         return int(os.environ["FAKE_CC_EXIT"])
@@ -204,8 +210,10 @@ def test_cc_bash_success_uses_resolved_claude_and_expands_prompt(tmp_path: Path)
 
     stdout_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stdout.log"
     stderr_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stderr.log"
+    events_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.events.jsonl"
     assert stdout_log.read_text() == "fake claude stdout\n"
     assert stderr_log.read_text() == "fake claude stderr\n"
+    assert not events_log.exists()
 
     argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
     assert argv[:5] == ["--model", "opus", "--output-format", "text", "--no-session-persistence"]
@@ -242,6 +250,37 @@ def test_cc_bash_success_uses_resolved_claude_and_expands_prompt(tmp_path: Path)
     assert "Signal path: `tmp/mux/session/.signals/agent-1.done`" in prompt
     assert "Wrapper validation, not raw Claude Code output, is authoritative." in prompt
     assert "final textual response must be exactly `0`" in prompt
+
+
+def test_cc_bash_stream_overrides_output_format_and_tees_events(tmp_path: Path) -> None:
+    """Streaming workers force stream-json while keeping wrapper stdout exactly zero."""
+    workspace = create_workspace(tmp_path)
+    fake_claude = write_fake_executable(tmp_path, "claude")
+
+    result = run_cc_bash(
+        workspace=workspace,
+        tmp_path=tmp_path,
+        path_value=str(fake_claude.parent),
+        extra_args=["--output-format", "json", "--stream"],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "0"
+    assert '{"type": "message_start", "message": "hello"}' in result.stderr
+    assert '{"type": "tool_use", "name": "Read"}' in result.stderr
+    assert "fake claude stream stderr" in result.stderr
+
+    stdout_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stdout.log"
+    stderr_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stderr.log"
+    events_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.events.jsonl"
+    assert stdout_log.read_text() == events_log.read_text()
+    events = [json.loads(line) for line in events_log.read_text().splitlines()]
+    assert [event["type"] for event in events] == ["message_start", "tool_use"]
+    assert stderr_log.read_text() == "fake claude stream stderr\n"
+
+    argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
+    assert argv[:4] == ["--model", "opus", "--output-format", "stream-json"]
+    assert "--verbose" in argv
 
 
 def test_cc_bash_falls_back_to_npx_package_when_claude_is_unavailable(tmp_path: Path) -> None:

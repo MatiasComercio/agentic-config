@@ -37,8 +37,14 @@ def main() -> int:
         prompt = ""
     prompt_path.write_text(prompt)
 
-    print("fake stdout")
-    print("fake stderr", file=sys.stderr)
+    stream_mode = "--mode" in sys.argv and sys.argv[sys.argv.index("--mode") + 1] == "json"
+    if stream_mode:
+        print(json.dumps({"type": "agent_start", "agent_id": "agent-1"}), flush=True)
+        print(json.dumps({"type": "tool_execution_start", "tool": "Read"}), flush=True)
+        print("fake stream stderr", file=sys.stderr, flush=True)
+    else:
+        print("fake stdout")
+        print("fake stderr", file=sys.stderr)
 
     if os.environ.get("FAKE_PI_EXIT", "0") != "0":
         return int(os.environ["FAKE_PI_EXIT"])
@@ -182,8 +188,10 @@ def test_pi_bash_success_prints_zero_persists_logs_and_expands_prompt(tmp_path: 
 
     stdout_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stdout.log"
     stderr_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stderr.log"
+    events_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.events.jsonl"
     assert stdout_log.read_text() == "fake stdout\n"
     assert stderr_log.read_text() == "fake stderr\n"
+    assert not events_log.exists()
 
     argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
     assert argv[:4] == ["--model", "example/model-tier", "--thinking", "xhigh"]
@@ -203,6 +211,31 @@ def test_pi_bash_success_prints_zero_persists_logs_and_expands_prompt(tmp_path: 
     assert f"Requested: `{workspace / 'sentinel.md'}`" in prompt
     assert "Content SHA-256:" in prompt
     assert "final textual response must be exactly `0`" in prompt
+
+
+def test_pi_bash_stream_tees_events_to_logs_and_wrapper_stderr(tmp_path: Path) -> None:
+    """Streaming workers preserve stdout protocol while exposing child JSONL live on stderr."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+
+    result = run_pi_bash(workspace=workspace, fake_pi=fake_pi, tmp_path=tmp_path, extra_args=["--stream"])
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "0"
+    assert '{"type": "agent_start", "agent_id": "agent-1"}' in result.stderr
+    assert '{"type": "tool_execution_start", "tool": "Read"}' in result.stderr
+    assert "fake stream stderr" in result.stderr
+
+    stdout_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stdout.log"
+    stderr_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stderr.log"
+    events_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.events.jsonl"
+    assert stdout_log.read_text() == events_log.read_text()
+    events = [json.loads(line) for line in events_log.read_text().splitlines()]
+    assert [event["type"] for event in events] == ["agent_start", "tool_execution_start"]
+    assert stderr_log.read_text() == "fake stream stderr\n"
+
+    argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
+    assert argv[:4] == ["--mode", "json", "--model", "example/model-tier"]
 
 
 GENERIC_FAILURE_CASES = [

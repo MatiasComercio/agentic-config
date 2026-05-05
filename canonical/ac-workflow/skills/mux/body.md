@@ -181,7 +181,8 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch \
   --signal-path "$SIGNAL_PATH" \
   --model "$MODEL" \
   --thinking "$THINKING" \
-  --cwd "$PROJECT_ROOT"
+  --cwd "$PROJECT_ROOT" \
+  --stream
 ```
 
 For Claude Code CLI workers:
@@ -198,12 +199,15 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash.py launch \
   --signal-path "$SIGNAL_PATH" \
   --model "$MODEL" \
   --permission-mode "$PERMISSION_MODE" \
-  --cwd "$PROJECT_ROOT"
+  --cwd "$PROJECT_ROOT" \
+  --stream
 ```
+
+Operational default: include `--stream` for wrapper launches so live child JSONL events appear in the background Bash task output. Omit it only for low-noise or legacy automation.
 
 The wrappers are foreground supervisors. Use Bash background execution from the harness when running them as background workers; do not add `&`, shell pipelines, redirection, or polling loops to the command string.
 
-`pi-bash.py` and `cc-bash.py` are intentionally reusable outside MUX. They validate file artifacts, log raw child output, and return exactly `0` on success, but they do not require a MUX ledger session. If a strict declare-before-dispatch gate is desired, enforce it in the coordinator and follow the relevant cookbook.
+`pi-bash.py` and `cc-bash.py` are intentionally reusable outside MUX. They validate file artifacts, log raw child output, and return exactly `0` on success, but they do not require a MUX ledger session. With `--stream`, they also persist raw child stdout events to `<SESSION_DIR>/logs/<agent-id>.events.jsonl` and mirror child stdout/stderr to wrapper stderr for live viewing. During active MUX execution, watch the background command output instead of tailing logs; after completion or explicit `deactivate.py`, inspect the events, stdout, and stderr logs for diagnostics. If a strict declare-before-dispatch gate is desired, enforce it in the coordinator and follow the relevant cookbook.
 
 ## ACCESSING REPORTS -- SANCTIONED METHOD ONLY
 

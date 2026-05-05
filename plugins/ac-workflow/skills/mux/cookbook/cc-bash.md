@@ -23,8 +23,11 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash.py launch \
   --allowed-tool "Edit" \
   --disallowed-tool "Task" \
   --skill "$SKILL_PATH" \
-  --cwd "$PROJECT_ROOT"
+  --cwd "$PROJECT_ROOT" \
+  --stream
 ```
+
+Operational default: include `--stream` for MUX launches so the coordinator can watch worker turn/tool events in the background command output. Omit it only for low-noise or legacy automation.
 
 The wrapper is a foreground supervisor. If the worker should run in the background, use the Bash tool's background mode. Do not add `&`, shell pipelines, redirection, or polling loops to the command string.
 
@@ -41,10 +44,13 @@ The concrete fallback may include `npx -y` to avoid an interactive package-insta
 
 `cc-bash.py` owns subprocess and artifact safety:
 
-- runs Claude Code with `subprocess.run(..., shell=False)`
+- runs Claude Code with `subprocess.run(..., shell=False)` in non-stream mode
 - uses Claude Code print mode with `-p`
 - appends skill preload context through `--append-system-prompt` instead of replacing the default system prompt
+- with `--stream`, forces `--output-format stream-json --verbose`
 - writes raw child stdout and stderr to `logs/<agent-id>.{stdout,stderr}.log`
+- with `--stream`, also writes raw child stdout JSONL to `logs/<agent-id>.events.jsonl`
+- with `--stream`, mirrors child stdout and stderr to wrapper stderr for live viewing
 - removes any stale declared signal before launch
 - requires the child process to exit `0`
 - requires the declared report file to exist
@@ -65,6 +71,22 @@ The concrete fallback may include `npx -y` to avoid an interactive package-insta
 - coordinator-side summary evidence
 
 Those checks are orchestration policy, not wrapper policy.
+
+## Streaming observability
+
+`--stream` exposes Claude Code's native `stream-json` event stream without normalizing or rewriting events. It overrides any explicit `--output-format` value and adds Claude Code's required `--verbose` flag. The wrapper stdout remains reserved for the success protocol and still prints exactly `0` only after validation passes.
+
+During active MUX execution, watch the background Bash task output emitted by the wrapper. Do not poll or tail log files while the worker is active.
+
+After completion, or after an explicit `deactivate.py` for diagnostics, inspect:
+
+```text
+<SESSION_DIR>/logs/<agent-id>.events.jsonl
+<SESSION_DIR>/logs/<agent-id>.stdout.log
+<SESSION_DIR>/logs/<agent-id>.stderr.log
+```
+
+Use `.events.jsonl` for raw Claude Code stream events, `.stdout.log` for the same raw child stdout, and `.stderr.log` for child stderr.
 
 ## Skill preloading
 

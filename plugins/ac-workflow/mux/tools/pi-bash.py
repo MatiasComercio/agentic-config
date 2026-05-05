@@ -16,7 +16,8 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from threading import Lock, Thread
+from typing import Sequence, TextIO
 
 REQUIRED_REPORT_HEADINGS = (
     "## Table of Contents",
@@ -55,6 +56,7 @@ class LaunchConfig:
     model: str
     thinking: str | None
     skills: tuple[str, ...]
+    stream: bool
     cwd: Path
     pi_bin: str
 
@@ -96,6 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Skill name or path to preload; repeat to preserve order",
     )
+    launch_parser.add_argument("--stream", action="store_true", help="Stream raw pi JSON events to stderr and an events log")
     launch_parser.add_argument("--cwd", default=".", help="Project root / worker current directory")
     launch_parser.add_argument("--pi-bin", default="pi", help="pi executable path, primarily for tests")
     return parser
@@ -106,12 +109,12 @@ def launch_from_args(args: argparse.Namespace) -> int:
     config = parse_launch_config(args)
     resolved_skills = tuple(resolve_skill(config.cwd, skill) for skill in config.skills)
     prompt = build_worker_prompt(config, resolved_skills)
-    stdout_log, stderr_log = log_paths(config.cwd, config.session_dir, config.agent_id)
+    stdout_log, stderr_log, events_log = log_paths(config.cwd, config.session_dir, config.agent_id)
     report_abs = resolve_project_path(config.cwd, config.report_path)
     signal_abs = resolve_project_path(config.cwd, config.signal_path)
     clear_previous_signal(signal_abs)
 
-    result = run_pi(config, resolved_skills, prompt, stdout_log, stderr_log)
+    result = run_pi(config, resolved_skills, prompt, stdout_log, stderr_log, events_log)
     if result != 0:
         raise PiBashError(f"pi exited with code {result}; see {stdout_log} and {stderr_log}")
 
@@ -162,6 +165,7 @@ def parse_launch_config(args: argparse.Namespace) -> LaunchConfig:
         model=str(args.model),
         thinking=str(args.thinking) if args.thinking else None,
         skills=tuple(str(skill) for skill in args.skill),
+        stream=bool(args.stream),
         cwd=cwd,
         pi_bin=str(args.pi_bin),
     )
@@ -173,17 +177,16 @@ def run_pi(
     prompt: str,
     stdout_log: Path,
     stderr_log: Path,
+    events_log: Path,
 ) -> int:
     """Run the underlying pi process and persist raw output to log files."""
     stdout_log.parent.mkdir(parents=True, exist_ok=True)
     stderr_log.parent.mkdir(parents=True, exist_ok=True)
+    events_log.parent.mkdir(parents=True, exist_ok=True)
 
-    command = [config.pi_bin, "--model", config.model]
-    if config.thinking:
-        command.extend(["--thinking", config.thinking])
-    for skill in skills:
-        command.extend(["--skill", str(skill.cli_path)])
-    command.extend(["-p", prompt])
+    command = build_pi_command(config, skills, prompt)
+    if config.stream:
+        return run_streaming_pi(command, config.cwd, stdout_log, stderr_log, events_log)
 
     try:
         result = subprocess.run(
@@ -201,6 +204,75 @@ def run_pi(
     stdout_log.write_text(result.stdout)
     stderr_log.write_text(result.stderr)
     return result.returncode
+
+
+def build_pi_command(config: LaunchConfig, skills: Sequence[ResolvedSkill], prompt: str) -> list[str]:
+    """Build the shell-free pi argv."""
+    command = [config.pi_bin]
+    if config.stream:
+        command.extend(["--mode", "json"])
+    command.extend(["--model", config.model])
+    if config.thinking:
+        command.extend(["--thinking", config.thinking])
+    for skill in skills:
+        command.extend(["--skill", str(skill.cli_path)])
+    command.extend(["-p", prompt])
+    return command
+
+
+def run_streaming_pi(command: Sequence[str], cwd: Path, stdout_log: Path, stderr_log: Path, events_log: Path) -> int:
+    """Run pi while teeing child streams to logs and wrapper stderr."""
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+    except OSError as error:
+        stdout_log.write_text("")
+        stderr_log.write_text(f"failed to execute pi: {error}\n")
+        events_log.write_text("")
+        raise PiBashError(f"failed to execute pi: {error}") from error
+
+    if process.stdout is None or process.stderr is None:
+        raise PiBashError("failed to capture pi stdout/stderr")
+
+    stderr_lock = Lock()
+    with stdout_log.open("w", encoding="utf-8", buffering=1) as stdout_file, stderr_log.open(
+        "w",
+        encoding="utf-8",
+        buffering=1,
+    ) as stderr_file, events_log.open("w", encoding="utf-8", buffering=1) as events_file:
+        stdout_thread = Thread(
+            target=tee_child_stream,
+            args=(process.stdout, (stdout_file, events_file), stderr_lock),
+            daemon=True,
+        )
+        stderr_thread = Thread(
+            target=tee_child_stream,
+            args=(process.stderr, (stderr_file,), stderr_lock),
+            daemon=True,
+        )
+        stdout_thread.start()
+        stderr_thread.start()
+        return_code = process.wait()
+        stdout_thread.join()
+        stderr_thread.join()
+    return return_code
+
+
+def tee_child_stream(source: TextIO, log_files: Sequence[TextIO], stderr_lock: Lock) -> None:
+    """Copy one child stream to log files and wrapper stderr line by line."""
+    for chunk in source:
+        for log_file in log_files:
+            log_file.write(chunk)
+            log_file.flush()
+        with stderr_lock:
+            sys.stderr.write(chunk)
+            sys.stderr.flush()
 
 
 def build_worker_prompt(config: LaunchConfig, skills: Sequence[ResolvedSkill]) -> str:
@@ -422,12 +494,16 @@ def skill_directory_content_path(path: Path) -> Path:
     return markdown_files[0]
 
 
-def log_paths(cwd: Path, session_dir: str, agent_id: str) -> tuple[Path, Path]:
-    """Return stdout/stderr log paths for the worker."""
+def log_paths(cwd: Path, session_dir: str, agent_id: str) -> tuple[Path, Path, Path]:
+    """Return stdout, stderr, and event log paths for the worker."""
     session_abs = resolve_project_path(cwd, session_dir)
     safe_name = safe_log_name(agent_id)
     logs_dir = session_abs / "logs"
-    return logs_dir / f"{safe_name}.stdout.log", logs_dir / f"{safe_name}.stderr.log"
+    return (
+        logs_dir / f"{safe_name}.stdout.log",
+        logs_dir / f"{safe_name}.stderr.log",
+        logs_dir / f"{safe_name}.events.jsonl",
+    )
 
 
 def safe_log_name(agent_id: str) -> str:
