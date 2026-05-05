@@ -117,7 +117,21 @@ def test_mux_bash_whitelist_matrix() -> None:
     )
     assert allowed
 
+    allowed, _ = MUX_GUARD.is_bash_allowed(
+        "uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash.py launch tmp/mux/session agent-1 "
+        "--role reviewer --objective objective --scope scope --task task "
+        "--report-path tmp/mux/session/reports/agent-1.md "
+        "--signal-path tmp/mux/session/.signals/agent-1.done --model opus"
+    )
+    assert allowed
+
     allowed, _ = MUX_GUARD.is_bash_allowed("pi --model example/model --thinking xhigh -p 'write files'")
+    assert not allowed
+
+    allowed, _ = MUX_GUARD.is_bash_allowed("claude --model opus -p 'write files'")
+    assert not allowed
+
+    allowed, _ = MUX_GUARD.is_bash_allowed("npx @anthropic-ai/claude-code --model opus -p 'write files'")
     assert not allowed
 
     allowed, _ = MUX_GUARD.is_bash_allowed("git status")

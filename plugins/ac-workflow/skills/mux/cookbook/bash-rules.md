@@ -14,6 +14,7 @@ Orchestrator Bash usage is LIMITED to these EXACT tools.
 | `uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/check-signals.py` | One-shot signal check (fallback) |
 | `uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/extract-summary.py` | Bounded report access (TOC + Executive Summary) |
 | `uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch ...` | Launch supervised programmatic pi worker with file-protocol validation |
+| `uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash.py launch ...` | Launch supervised Claude Code CLI worker with file-protocol validation |
 | `uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/agents.py` | List/register agents |
 | `mkdir -p` | Create directories |
 
@@ -33,6 +34,8 @@ Orchestrator Bash usage is LIMITED to these EXACT tools.
 | `cat` / `head` / `tail` | File reading |
 | `python *` | Script execution |
 | `pi *` | Direct programmatic pi execution; use `pi-bash.py` instead |
+| `claude *` | Direct Claude Code print-mode execution; use `cc-bash.py` instead |
+| `npx @anthropic-ai/claude-code *` | Direct Claude Code package execution; use `cc-bash.py` instead |
 | `node *` | Script execution |
 | `cargo *` / `go *` | Build commands |
 | `make` / `gradle` / `mvn` | Build commands |
@@ -51,6 +54,10 @@ grep -rn "pattern" --include="*.md"
 
 # FATAL - orchestrator launched pi directly instead of using the wrapper
 pi --model "$MODEL" --thinking "$THINKING" -p "$PROMPT"
+
+# FATAL - orchestrator launched Claude Code directly instead of using the wrapper
+claude --model "$MODEL" -p "$PROMPT"
+npx @anthropic-ai/claude-code --model "$MODEL" -p "$PROMPT"
 ```
 
 ## Correct Delegation
@@ -66,9 +73,11 @@ Task(prompt="Read ${CLAUDE_PLUGIN_ROOT}/skills/mux/agents/sentinel.md. Check git
 Task(prompt="Read ${CLAUDE_PLUGIN_ROOT}/skills/mux/agents/auditor.md. Search for pattern.", model="sonnet", run_in_background=True)
 ```
 
-## Programmatic pi Workers
+## Programmatic CLI Workers
 
-Direct `pi ... -p ...` Bash commands remain blocked. Use the wrapper when a MUX wave needs a programmatic pi worker:
+Direct `pi ... -p ...`, `claude -p ...`, and `npx @anthropic-ai/claude-code -p ...` Bash commands remain blocked. Use a wrapper when a MUX wave needs a programmatic CLI worker.
+
+For pi workers:
 
 ```bash
 uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch \
@@ -85,7 +94,24 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch \
   --cwd "$PROJECT_ROOT"
 ```
 
-`pi-bash.py` validates the declared report and signal files after the pi process exits. It does not require an active MUX ledger session; declare-before-dispatch matching is coordinator policy. See `pi-bash.md` for optional strict orchestration guidance.
+For Claude Code CLI workers:
+
+```bash
+uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash.py launch \
+  "$SESSION_DIR" "$AGENT_ID" \
+  --role "$ROLE" \
+  --worker-type "$WORKER_TYPE" \
+  --objective "$OBJECTIVE" \
+  --scope "$SCOPE" \
+  --task "$TASK" \
+  --report-path "$REPORT_PATH" \
+  --signal-path "$SIGNAL_PATH" \
+  --model "$MODEL" \
+  --permission-mode "$PERMISSION_MODE" \
+  --cwd "$PROJECT_ROOT"
+```
+
+`pi-bash.py` and `cc-bash.py` validate the declared report and signal files after the child process exits. They do not require an active MUX ledger session; declare-before-dispatch matching is coordinator policy. See `pi-bash.md` and `cc-bash.md` for optional strict orchestration guidance.
 
 ## Hook Whitelist Patterns
 
@@ -95,6 +121,7 @@ The orchestrator hook (`mux-orchestrator-guard.py`) enforces these regex pattern
 BASH_WHITELIST_PATTERNS = [
     r"^mkdir\s+-p\s+",                          # Create directories
     r"^uv\s+run\s+\${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash\.py\s+launch\b",  # pi worker wrapper
+    r"^uv\s+run\s+\${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash\.py\s+launch\b",  # Claude Code worker wrapper
     r"^uv\s+run\s+.*tools/",                    # Any tools/ invocation
     r"^uv\s+run\s+\${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/",  # MUX skill tools (explicit)
 ]

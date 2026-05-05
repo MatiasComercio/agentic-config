@@ -265,6 +265,7 @@ def test_generated_mux_claude_frontmatter_survives_generation() -> None:
     assert "matcher: Read|Write|Edit|NotebookEdit|Grep|Glob|WebSearch|WebFetch|TaskOutput|Skill|Bash|Task" in mux_text
     assert "${CLAUDE_PLUGIN_ROOT}/skills/mux/hooks/mux-orchestrator-guard.py" in mux_text
     assert "${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch" in mux_text
+    assert "${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash.py launch" in mux_text
 
     mux_ospec_text = CLAUDE_MUX_OSPEC_SKILL.read_text()
     assert "argument-hint:" in mux_ospec_text
@@ -297,8 +298,11 @@ def test_generated_pi_mux_foundation_assets_exist() -> None:
     assert (MUX_TOOLS_ROOT / "session.py").exists()
     assert (MUX_TOOLS_ROOT / "ledger.py").exists()
     assert (MUX_TOOLS_ROOT / "pi-bash.py").exists()
+    assert (MUX_TOOLS_ROOT / "cc-bash.py").exists()
     assert (PROJECT_ROOT / "plugins" / "ac-workflow" / "mux" / "tools" / "pi-bash.py").exists()
+    assert (PROJECT_ROOT / "plugins" / "ac-workflow" / "mux" / "tools" / "cc-bash.py").exists()
     assert (PROJECT_ROOT / "plugins" / "ac-workflow" / "skills" / "mux" / "tools" / "pi-bash.py").exists()
+    assert (PROJECT_ROOT / "plugins" / "ac-workflow" / "skills" / "mux" / "tools" / "cc-bash.py").exists()
     assert (MUX_TOOLS_ROOT / "signal.py").exists()
     assert (MUX_TOOLS_ROOT / "verify.py").exists()
     assert PI_MUX_SKILL.exists()

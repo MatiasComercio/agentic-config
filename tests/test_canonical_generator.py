@@ -61,7 +61,9 @@ def test_generator_plugin_filter_stays_within_seeded_scope() -> None:
     assert (PROJECT_ROOT / "packages" / "pi-ac-workflow" / "skills" / "ac-workflow-mux-subagent" / "SKILL.md").exists()
     assert not (PROJECT_ROOT / "packages" / "pi-ac-workflow" / "skills" / "ac-workflow-tmux-agent" / "SKILL.md").exists()
     assert (PROJECT_ROOT / "packages" / "pi-ac-workflow" / "assets" / "mux" / "tools" / "pi-bash.py").exists()
+    assert (PROJECT_ROOT / "packages" / "pi-ac-workflow" / "assets" / "mux" / "tools" / "cc-bash.py").exists()
     assert (PROJECT_ROOT / "plugins" / "ac-workflow" / "mux" / "tools" / "pi-bash.py").exists()
+    assert (PROJECT_ROOT / "plugins" / "ac-workflow" / "mux" / "tools" / "cc-bash.py").exists()
     assert (PROJECT_ROOT / "packages" / "pi-ac-workflow" / "extensions" / "pimux" / "index.ts").exists()
     assert not (PROJECT_ROOT / "packages" / "pi-ac-workflow" / "extensions" / "tmux-agent" / "index.ts").exists()
 
