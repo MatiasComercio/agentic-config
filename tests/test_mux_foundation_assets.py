@@ -283,7 +283,8 @@ def test_generated_mux_claude_frontmatter_survives_generation() -> None:
     assert "${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch" in mux_text
     assert "${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash.py launch" in mux_text
     assert "--stream" in mux_text
-    assert "<SESSION_DIR>/logs/<agent-id>.events.jsonl" in mux_text
+    assert "<SESSION_DIR>/logs/<agent-id>.<attempt-id>.*" in mux_text
+    assert "<SESSION_DIR>/logs/<agent-id>.latest.json" in mux_text
 
     mux_ospec_text = CLAUDE_MUX_OSPEC_SKILL.read_text()
     assert "argument-hint:" in mux_ospec_text
@@ -326,10 +327,14 @@ def test_generated_pi_mux_foundation_assets_exist() -> None:
     assert "--stream" in pi_bash_text
     assert '"--mode", "json"' in pi_bash_text
     assert "--startup-timeout" in pi_bash_text
+    assert "DEFAULT_STARTUP_TIMEOUT_SECONDS = 0.0" in pi_bash_text
     assert "--raw-events" in pi_bash_text
-    assert 'f"{safe_name}.events.jsonl"' in pi_bash_text
-    assert 'f"{safe_name}.raw-events.jsonl"' in pi_bash_text
-    assert 'f"{safe_name}.wrapper.log"' in pi_bash_text
+    assert "--heartbeat-interval" in pi_bash_text
+    assert "--no-extensions" in pi_bash_text
+    assert 'f"{prefix}.events.jsonl"' in pi_bash_text
+    assert 'f"{prefix}.raw-events.jsonl"' in pi_bash_text
+    assert 'f"{prefix}.wrapper.log"' in pi_bash_text
+    assert 'f"{safe_name}.latest.json"' in pi_bash_text
     assert "--stream" in cc_bash_text
     assert '"stream-json" if args.stream else str(args.output_format)' in cc_bash_text
     assert 'command.append("--verbose")' in cc_bash_text

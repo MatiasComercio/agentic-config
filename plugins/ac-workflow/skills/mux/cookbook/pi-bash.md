@@ -23,7 +23,7 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch \
   --stream
 ```
 
-Operational default: include `--stream` for MUX launches so the coordinator can watch worker turn/tool events in the background command output. Omit it only for low-noise or legacy automation.
+Operational default: include `--stream` for MUX launches so the coordinator can watch worker turn/tool events in the background command output. Omit it only for low-noise or legacy automation. `pi-bash` disables the stream first-output timeout by default because `pi --mode json` can be legitimately silent before its first model/tool event; use `--startup-timeout N` only as an explicit diagnostic fail-fast option.
 
 The wrapper is a foreground supervisor. If the worker should run in the background, use the Bash tool's background mode. Do not add `&`, shell pipelines, redirection, or polling loops to the command string.
 
@@ -31,17 +31,20 @@ The wrapper is a foreground supervisor. If the worker should run in the backgrou
 
 `pi-bash.py` owns subprocess and artifact safety:
 
-- runs `pi` with `subprocess.run(..., shell=False)` in non-stream mode
+- runs `pi` with `subprocess.Popen(..., shell=False, start_new_session=True)` in stream and non-stream mode
 - passes requested skills to pi with repeatable `--skill` arguments
 - with `--stream`, runs pi with `--mode json`
-- writes raw child stdout and stderr to `logs/<agent-id>.{stdout,stderr}.log` in non-stream mode
-- writes wrapper-side launch diagnostics to `logs/<agent-id>.wrapper.log` before child output exists
-- with `--stream`, writes sanitized child stdout JSONL to `logs/<agent-id>.events.jsonl`
-- with `--stream`, keeps `logs/<agent-id>.stdout.log` lean instead of duplicating JSON events
-- with `--stream --raw-events`, additionally writes unsanitized child stdout JSONL to `logs/<agent-id>.raw-events.jsonl`
+- writes attempt-scoped logs to `logs/<agent-id>.<attempt-id>.*`
+- writes `logs/<agent-id>.latest.json` so retries never overwrite prior evidence
+- writes wrapper-side launch diagnostics before child output exists
+- with `--stream`, writes sanitized child stdout JSONL to `.events.jsonl`
+- with `--stream`, keeps `.stdout.log` lean instead of duplicating JSON events
+- with `--stream --raw-events`, additionally writes unsanitized child stdout JSONL to `.raw-events.jsonl`
 - with `--stream`, mirrors sanitized child stdout events and raw child stderr to wrapper stderr for live viewing
-- with `--stream`, terminates the child process group if no first stdout/stderr line arrives before `--startup-timeout` seconds
-- with `--stream`, bounds stream-reader shutdown after child exit and cleans up process-group descendants before failing closed
+- with explicit `--startup-timeout`, terminates the child process group if no first stdout/stderr line arrives before the timeout
+- supervises stream and non-stream children with heartbeat diagnostics, optional runtime/idle timeouts, and sanitized process/session snapshots
+- defaults to `--no-extensions` with a built-in tool allowlist unless explicitly overridden
+- bounds stream-reader shutdown after child exit and cleans up process-group descendants before failing closed
 - requires the child process to exit `0`
 - requires the declared report file to exist
 - requires the declared signal file to exist
@@ -64,21 +67,22 @@ Those checks are orchestration policy, not wrapper policy.
 
 ## Streaming observability
 
-`--stream` exposes pi's native JSON event stream without normalizing or rewriting events. The wrapper stdout remains reserved for the success protocol and still prints exactly `0` only after validation passes.
+`--stream` exposes pi's native JSON event stream as lean/sanitized JSONL. The wrapper stdout remains reserved for the success protocol and still prints exactly `0` only after validation passes.
 
 During active MUX execution, watch the background Bash task output emitted by the wrapper. Do not poll or tail log files while the worker is active.
 
 After completion, or after an explicit `deactivate.py` for diagnostics, inspect:
 
 ```text
-<SESSION_DIR>/logs/<agent-id>.events.jsonl
-<SESSION_DIR>/logs/<agent-id>.stdout.log
-<SESSION_DIR>/logs/<agent-id>.stderr.log
-<SESSION_DIR>/logs/<agent-id>.wrapper.log
-<SESSION_DIR>/logs/<agent-id>.raw-events.jsonl  # only with --raw-events
+<SESSION_DIR>/logs/<agent-id>.<attempt-id>.events.jsonl
+<SESSION_DIR>/logs/<agent-id>.<attempt-id>.stdout.log
+<SESSION_DIR>/logs/<agent-id>.<attempt-id>.stderr.log
+<SESSION_DIR>/logs/<agent-id>.<attempt-id>.wrapper.log
+<SESSION_DIR>/logs/<agent-id>.<attempt-id>.raw-events.jsonl  # only with --raw-events
+<SESSION_DIR>/logs/<agent-id>.latest.json
 ```
 
-Use `.events.jsonl` for lean pi turn/tool event history, `.stdout.log` for non-JSON stdout plus stream-mode notes, `.stderr.log` for child stderr, and `.wrapper.log` for sanitized argv, child PID, timeout, and exit diagnostics. Use `--raw-events` only for explicit forensic debugging because it can be large and may contain provider internals.
+Use `.events.jsonl` for lean pi turn/tool event history, `.stdout.log` for non-JSON stdout plus stream-mode notes, `.stderr.log` for child stderr plus wrapper diagnostics, `.wrapper.log` for sanitized argv, child PID, heartbeat/snapshot, timeout, and exit diagnostics, and `.latest.json` to find the newest attempt. Use `--raw-events` only for explicit forensic debugging because it can be large and may contain provider internals.
 
 ## Skill preloading
 

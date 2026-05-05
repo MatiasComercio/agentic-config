@@ -223,11 +223,11 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash.py launch \
   --stream
 ```
 
-Operational default: include `--stream` for wrapper launches so live child JSONL events appear in the background Bash task output. Omit it only for low-noise or legacy automation.
+Operational default: include `--stream` for wrapper launches so live child JSONL events appear in the background Bash task output. Omit it only for low-noise or legacy automation. `pi-bash` disables the stream first-output timeout by default because `pi --mode json` can be legitimately silent before its first model/tool event; use `--startup-timeout N` only as an explicit diagnostic fail-fast option.
 
 The wrappers are foreground supervisors. Use Bash background execution from the harness when running them as background workers; do not add `&`, shell pipelines, redirection, or polling loops to the command string.
 
-`pi-bash.py` and `cc-bash.py` are intentionally reusable outside MUX. They validate file artifacts, keep stream stdout logs lean, write wrapper diagnostics, and return exactly `0` on success, but they do not require a MUX ledger session. With `--stream`, they persist sanitized child stdout events to `<SESSION_DIR>/logs/<agent-id>.events.jsonl` and mirror sanitized child stdout plus raw child stderr to wrapper stderr for live viewing; `--raw-events` is explicit forensic opt-in. During active MUX execution, watch the background command output instead of tailing logs; after completion or explicit `deactivate.py`, inspect the events, stdout, stderr, and wrapper logs for diagnostics. If a strict declare-before-dispatch gate is desired, enforce it in the coordinator and follow the relevant cookbook.
+`pi-bash.py` and `cc-bash.py` are intentionally reusable outside MUX. They validate file artifacts, keep stream stdout logs lean, write wrapper diagnostics, and return exactly `0` on success, but they do not require a MUX ledger session. `pi-bash.py` preserves retry evidence in attempt-scoped logs (`<SESSION_DIR>/logs/<agent-id>.<attempt-id>.*`) and writes `<SESSION_DIR>/logs/<agent-id>.latest.json` to locate the newest attempt. With `--stream`, the wrappers persist sanitized child stdout events and mirror sanitized child stdout plus raw child stderr to wrapper stderr for live viewing; `--raw-events` is explicit forensic opt-in. During active MUX execution, watch the background command output instead of tailing logs; after completion or explicit `deactivate.py`, inspect the events, stdout, stderr, wrapper logs, and latest manifest for diagnostics. If a strict declare-before-dispatch gate is desired, enforce it in the coordinator and follow the relevant cookbook.
 
 ## ACCESSING REPORTS -- SANCTIONED METHOD ONLY
 

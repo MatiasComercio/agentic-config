@@ -12,6 +12,12 @@ from typing import Mapping, Sequence
 
 PROJECT_ROOT = Path(__file__).resolve().parents[6]
 PI_BASH = PROJECT_ROOT / "plugins" / "ac-workflow" / "skills" / "mux" / "tools" / "pi-bash.py"
+ATTEMPT_ID = "attempt-1"
+
+
+def log_path(workspace: Path, name: str) -> Path:
+    """Return the deterministic attempt-scoped log path for the test worker."""
+    return workspace / "tmp" / "mux" / "session" / "logs" / f"agent-1.{ATTEMPT_ID}.{name}"
 
 
 FAKE_PI = r'''#!/usr/bin/env python3
@@ -192,6 +198,8 @@ def run_pi_bash(
         str(workspace),
         "--pi-bin",
         str(fake_pi),
+        "--attempt-id",
+        ATTEMPT_ID,
         *extra_args,
     ]
     return subprocess.run(command, capture_output=True, text=True, check=False, env=env)
@@ -206,14 +214,14 @@ def test_pi_bash_success_prints_zero_persists_logs_and_expands_prompt(tmp_path: 
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == "0"
-    assert result.stderr == ""
+    assert "pi-bash: spawned pid=" in result.stderr
 
-    stdout_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stdout.log"
-    stderr_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stderr.log"
-    events_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.events.jsonl"
-    wrapper_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.wrapper.log"
+    stdout_log = log_path(workspace, "stdout.log")
+    stderr_log = log_path(workspace, "stderr.log")
+    events_log = log_path(workspace, "events.jsonl")
+    wrapper_log = log_path(workspace, "wrapper.log")
     assert stdout_log.read_text() == "fake stdout\n"
-    assert stderr_log.read_text() == "fake stderr\n"
+    assert "fake stderr\n" in stderr_log.read_text()
     assert not events_log.exists()
     wrapper_text = wrapper_log.read_text()
     assert "prompt_bytes:" in wrapper_text
@@ -222,7 +230,8 @@ def test_pi_bash_success_prints_zero_persists_logs_and_expands_prompt(tmp_path: 
     assert "Write the report and signal files." not in wrapper_text
 
     argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
-    assert argv[:4] == ["--model", "example/model-tier", "--thinking", "xhigh"]
+    assert argv[:6] == ["--no-extensions", "--tools", "read,bash,edit,write,grep,find,ls", "--model", "example/model-tier", "--thinking"]
+    assert argv[6] == "xhigh"
     skill_args = [argv[index + 1] for index, value in enumerate(argv) if value == "--skill"]
     assert skill_args == [
         str(workspace / ".claude" / "skills" / "builder" / "SKILL.md"),
@@ -254,18 +263,18 @@ def test_pi_bash_stream_tees_events_to_logs_and_wrapper_stderr(tmp_path: Path) -
     assert '"type":"tool_execution_start"' in result.stderr
     assert "fake stream stderr" in result.stderr
 
-    stdout_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stdout.log"
-    stderr_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stderr.log"
-    events_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.events.jsonl"
-    raw_events_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.raw-events.jsonl"
+    stdout_log = log_path(workspace, "stdout.log")
+    stderr_log = log_path(workspace, "stderr.log")
+    events_log = log_path(workspace, "events.jsonl")
+    raw_events_log = log_path(workspace, "raw-events.jsonl")
     assert "stream stdout JSON events are captured as lean events" in stdout_log.read_text()
     assert not raw_events_log.exists()
     events = [json.loads(line) for line in events_log.read_text().splitlines()]
     assert [event["type"] for event in events] == ["agent_start", "tool_execution_start"]
-    assert stderr_log.read_text() == "fake stream stderr\n"
+    assert "fake stream stderr\n" in stderr_log.read_text()
 
     argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
-    assert argv[:4] == ["--mode", "json", "--model", "example/model-tier"]
+    assert argv[:5] == ["--mode", "json", "--no-extensions", "--tools", "read,bash,edit,write,grep,find,ls"]
 
 
 def test_pi_bash_stream_sanitizes_events_with_raw_opt_in(tmp_path: Path) -> None:
@@ -282,10 +291,9 @@ def test_pi_bash_stream_sanitizes_events_with_raw_opt_in(tmp_path: Path) -> None
     )
 
     assert result.returncode == 0, result.stderr
-    logs_dir = workspace / "tmp" / "mux" / "session" / "logs"
-    events_text = (logs_dir / "agent-1.events.jsonl").read_text()
-    raw_events_text = (logs_dir / "agent-1.raw-events.jsonl").read_text()
-    stdout_text = (logs_dir / "agent-1.stdout.log").read_text()
+    events_text = log_path(workspace, "events.jsonl").read_text()
+    raw_events_text = log_path(workspace, "raw-events.jsonl").read_text()
+    stdout_text = log_path(workspace, "stdout.log").read_text()
 
     assert "secret prompt text" not in events_text
     assert "encrypted-signature-value" not in events_text
@@ -294,6 +302,64 @@ def test_pi_bash_stream_sanitizes_events_with_raw_opt_in(tmp_path: Path) -> None
     assert "encrypted-signature-value" in raw_events_text
     assert "secret prompt text" not in stdout_text
     assert "raw stream stdout is captured" in stdout_text
+
+
+def test_pi_bash_stream_waits_by_default_for_delayed_first_event(tmp_path: Path) -> None:
+    """Default stream mode does not kill a healthy child before its first JSON event."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+
+    result = run_pi_bash(
+        workspace=workspace,
+        fake_pi=fake_pi,
+        tmp_path=tmp_path,
+        extra_args=["--stream"],
+        env_overrides={"FAKE_PI_SLEEP_BEFORE_OUTPUT": "0.2"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "0"
+    assert '"type":"agent_start"' in log_path(workspace, "events.jsonl").read_text()
+
+
+def test_pi_bash_non_stream_emits_hang_snapshot_without_killing_by_default(tmp_path: Path) -> None:
+    """Non-stream workers produce diagnostics while waiting through child silence."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+
+    result = run_pi_bash(
+        workspace=workspace,
+        fake_pi=fake_pi,
+        tmp_path=tmp_path,
+        extra_args=["--heartbeat-interval", "0.1", "--hang-snapshot-after", "0.1"],
+        env_overrides={"FAKE_PI_SLEEP_BEFORE_OUTPUT": "0.3"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    wrapper_text = log_path(workspace, "wrapper.log").read_text()
+    assert "pi-bash snapshot: child still running" in wrapper_text
+    assert "process_tree:" in wrapper_text
+
+
+def test_pi_bash_preserves_attempt_logs_and_updates_latest_manifest(tmp_path: Path) -> None:
+    """Retries with the same agent id keep prior evidence instead of overwriting logs."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+
+    first = run_pi_bash(workspace=workspace, fake_pi=fake_pi, tmp_path=tmp_path)
+    second = run_pi_bash(
+        workspace=workspace,
+        fake_pi=fake_pi,
+        tmp_path=tmp_path,
+        extra_args=["--attempt-id", "attempt-2"],
+    )
+
+    assert first.returncode == 0, first.stderr
+    assert second.returncode == 0, second.stderr
+    assert log_path(workspace, "wrapper.log").exists()
+    assert (workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.attempt-2.wrapper.log").exists()
+    latest = json.loads((workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.latest.json").read_text())
+    assert latest["attempt_id"] == "attempt-2"
 
 
 def test_pi_bash_stream_cleans_up_inherited_pipe_descendants(tmp_path: Path) -> None:
@@ -313,7 +379,7 @@ def test_pi_bash_stream_cleans_up_inherited_pipe_descendants(tmp_path: Path) -> 
     assert result.stdout == "0"
     assert "stream readers did not finish after child exit" in result.stderr
 
-    wrapper_text = (workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.wrapper.log").read_text()
+    wrapper_text = log_path(workspace, "wrapper.log").read_text()
     assert "process_group_id:" in wrapper_text
     assert "exit_code: 0" in wrapper_text
 
@@ -336,10 +402,9 @@ def test_pi_bash_stream_fails_fast_when_child_never_emits_first_event(tmp_path: 
     assert "pi produced no stdout/stderr within 0.1s in stream mode" in result.stderr
     assert "process_tree:" in result.stderr
 
-    logs_dir = workspace / "tmp" / "mux" / "session" / "logs"
-    assert (logs_dir / "agent-1.events.jsonl").read_text() == ""
-    assert "no child stdout/stderr after 0.1s" in (logs_dir / "agent-1.stderr.log").read_text()
-    wrapper_text = (logs_dir / "agent-1.wrapper.log").read_text()
+    assert log_path(workspace, "events.jsonl").read_text() == ""
+    assert "no child stdout/stderr after 0.1s" in log_path(workspace, "stderr.log").read_text()
+    wrapper_text = log_path(workspace, "wrapper.log").read_text()
     assert "child_pid:" in wrapper_text
     assert "command:" in wrapper_text
     assert "<redacted>" in wrapper_text

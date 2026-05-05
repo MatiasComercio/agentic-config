@@ -22,8 +22,15 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Sequence, TextIO
 
-DEFAULT_STARTUP_TIMEOUT_SECONDS = 60.0
+DEFAULT_STARTUP_TIMEOUT_SECONDS = 0.0
 DEFAULT_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 60.0
+DEFAULT_HANG_SNAPSHOT_AFTER_SECONDS = 120.0
+DEFAULT_RUNTIME_TIMEOUT_SECONDS = 0.0
+DEFAULT_IDLE_TIMEOUT_SECONDS = 0.0
+DEFAULT_TOOL_ALLOWLIST = "read,bash,edit,write,grep,find,ls"
+MAX_SESSION_TAIL_BYTES = 262_144
+MAX_SESSION_TAIL_LINES = 80
 # Do not import stdlib signal here: this directory also contains signal.py.
 SIGTERM = 15
 SIGKILL = 9
@@ -101,6 +108,36 @@ class ProcessSnapshot:
     command: str
 
 
+@dataclass
+class OutputActivity:
+    """Thread-safe child-output activity tracker."""
+
+    last_output_monotonic: float
+    lock: Lock
+
+    def mark(self) -> None:
+        """Record child stdout/stderr activity."""
+        with self.lock:
+            self.last_output_monotonic = time.monotonic()
+
+    def idle_seconds(self) -> float:
+        """Return seconds since the last child stdout/stderr activity."""
+        with self.lock:
+            return time.monotonic() - self.last_output_monotonic
+
+
+@dataclass(frozen=True)
+class LaunchPaths:
+    """Attempt-scoped worker log and manifest paths."""
+
+    stdout_log: Path
+    stderr_log: Path
+    events_log: Path
+    raw_events_log: Path
+    wrapper_log: Path
+    latest_manifest: Path
+
+
 @dataclass(frozen=True)
 class LaunchConfig:
     """Validated launch configuration."""
@@ -117,10 +154,18 @@ class LaunchConfig:
     model: str
     thinking: str | None
     skills: tuple[str, ...]
+    extensions: tuple[str, ...]
+    allow_extensions: bool
+    tools: str | None
     stream: bool
     raw_events: bool
     startup_timeout: float
     shutdown_timeout: float
+    heartbeat_interval: float
+    hang_snapshot_after: float
+    runtime_timeout: float
+    idle_timeout: float
+    attempt_id: str
     cwd: Path
     pi_bin: str
 
@@ -162,6 +207,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Skill name or path to preload; repeat to preserve order",
     )
+    launch_parser.add_argument(
+        "--extension",
+        action="append",
+        default=[],
+        help="Explicit pi extension path to load; repeat to preserve order",
+    )
+    launch_parser.add_argument(
+        "--allow-extensions",
+        action="store_true",
+        help="Allow normal extension discovery; default is --no-extensions plus explicit --extension only",
+    )
+    launch_parser.add_argument(
+        "--tools",
+        default=DEFAULT_TOOL_ALLOWLIST,
+        help="Comma-separated pi tool allowlist; use an empty value to omit the flag",
+    )
     launch_parser.add_argument("--stream", action="store_true", help="Stream lean pi JSON events to stderr and an events log")
     launch_parser.add_argument(
         "--raw-events",
@@ -183,6 +244,31 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_SHUTDOWN_TIMEOUT_SECONDS,
         help="Seconds to wait for stream reader threads to drain after child exit before cleaning up descendants",
     )
+    launch_parser.add_argument(
+        "--heartbeat-interval",
+        type=parse_non_negative_float,
+        default=DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+        help="Seconds between wrapper heartbeat diagnostics while the child is still running; use 0 to disable",
+    )
+    launch_parser.add_argument(
+        "--hang-snapshot-after",
+        type=parse_non_negative_float,
+        default=DEFAULT_HANG_SNAPSHOT_AFTER_SECONDS,
+        help="Seconds before heartbeats include process/session snapshots; use 0 to disable snapshots",
+    )
+    launch_parser.add_argument(
+        "--runtime-timeout",
+        type=parse_non_negative_float,
+        default=DEFAULT_RUNTIME_TIMEOUT_SECONDS,
+        help="Maximum child runtime in seconds before terminating; use 0 to disable",
+    )
+    launch_parser.add_argument(
+        "--idle-timeout",
+        type=parse_non_negative_float,
+        default=DEFAULT_IDLE_TIMEOUT_SECONDS,
+        help="Maximum seconds without child stdout/stderr before terminating; use 0 to disable",
+    )
+    launch_parser.add_argument("--attempt-id", default=None, help="Optional deterministic attempt id for log names")
     launch_parser.add_argument("--cwd", default=".", help="Project root / worker current directory")
     launch_parser.add_argument("--pi-bin", default="pi", help="pi executable path, primarily for tests")
     return parser
@@ -204,18 +290,14 @@ def launch_from_args(args: argparse.Namespace) -> int:
     config = parse_launch_config(args)
     resolved_skills = tuple(resolve_skill(config.cwd, skill) for skill in config.skills)
     prompt = build_worker_prompt(config, resolved_skills)
-    stdout_log, stderr_log, events_log, raw_events_log, wrapper_log = log_paths(
-        config.cwd,
-        config.session_dir,
-        config.agent_id,
-    )
+    paths = log_paths(config.cwd, config.session_dir, config.agent_id, config.attempt_id)
     report_abs = resolve_project_path(config.cwd, config.report_path)
     signal_abs = resolve_project_path(config.cwd, config.signal_path)
     clear_previous_signal(signal_abs)
 
-    result = run_pi(config, resolved_skills, prompt, stdout_log, stderr_log, events_log, raw_events_log, wrapper_log)
+    result = run_pi(config, resolved_skills, prompt, paths, report_abs, signal_abs)
     if result != 0:
-        raise PiBashError(f"pi exited with code {result}; see {stdout_log} and {stderr_log}")
+        raise PiBashError(f"pi exited with code {result}; see {paths.stdout_log} and {paths.stderr_log}")
 
     validate_protocol_outputs(
         report_abs=report_abs,
@@ -264,10 +346,18 @@ def parse_launch_config(args: argparse.Namespace) -> LaunchConfig:
         model=str(args.model),
         thinking=str(args.thinking) if args.thinking else None,
         skills=tuple(str(skill) for skill in args.skill),
+        extensions=tuple(str(extension) for extension in args.extension),
+        allow_extensions=bool(args.allow_extensions),
+        tools=str(args.tools) if str(args.tools).strip() else None,
         stream=bool(args.stream),
         raw_events=bool(args.raw_events),
         startup_timeout=float(args.startup_timeout),
         shutdown_timeout=float(args.shutdown_timeout),
+        heartbeat_interval=float(args.heartbeat_interval),
+        hang_snapshot_after=float(args.hang_snapshot_after),
+        runtime_timeout=float(args.runtime_timeout),
+        idle_timeout=float(args.idle_timeout),
+        attempt_id=str(args.attempt_id) if args.attempt_id else build_attempt_id(),
         cwd=cwd,
         pi_bin=str(args.pi_bin),
     )
@@ -277,63 +367,30 @@ def run_pi(
     config: LaunchConfig,
     skills: Sequence[ResolvedSkill],
     prompt: str,
-    stdout_log: Path,
-    stderr_log: Path,
-    events_log: Path,
-    raw_events_log: Path,
-    wrapper_log: Path,
+    paths: LaunchPaths,
+    report_abs: Path,
+    signal_abs: Path,
 ) -> int:
-    """Run the underlying pi process and persist raw output to log files."""
-    stdout_log.parent.mkdir(parents=True, exist_ok=True)
-    stderr_log.parent.mkdir(parents=True, exist_ok=True)
-    events_log.parent.mkdir(parents=True, exist_ok=True)
+    """Run the underlying pi process and persist raw output to attempt-scoped logs."""
+    paths.stdout_log.parent.mkdir(parents=True, exist_ok=True)
+    paths.stderr_log.parent.mkdir(parents=True, exist_ok=True)
+    paths.events_log.parent.mkdir(parents=True, exist_ok=True)
 
     command = build_pi_command(config, skills, prompt)
     write_launch_metadata(
-        wrapper_log=wrapper_log,
+        wrapper_log=paths.wrapper_log,
         config=config,
         command=command,
         prompt=prompt,
         skill_count=len(skills),
-        stdout_log=stdout_log,
-        stderr_log=stderr_log,
-        events_log=events_log,
-        raw_events_log=raw_events_log,
+        paths=paths,
     )
-    if not config.stream and raw_events_log.exists():
-        raw_events_log.unlink()
+    write_latest_manifest(paths, config, command, "prepared")
+    if not config.stream and paths.raw_events_log.exists():
+        paths.raw_events_log.unlink()
     if config.stream:
-        return run_streaming_pi(
-            command,
-            config.cwd,
-            stdout_log,
-            stderr_log,
-            events_log,
-            raw_events_log,
-            wrapper_log,
-            config.raw_events,
-            config.startup_timeout,
-            config.shutdown_timeout,
-        )
-
-    try:
-        result = subprocess.run(
-            command,
-            cwd=config.cwd,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError as error:
-        stdout_log.write_text("")
-        stderr_log.write_text(f"failed to execute pi: {error}\n")
-        append_wrapper_log(wrapper_log, f"failed_at: {utc_timestamp()}\nerror: failed to execute pi: {error}\n")
-        raise PiBashError(f"failed to execute pi: {error}") from error
-
-    stdout_log.write_text(result.stdout)
-    stderr_log.write_text(result.stderr)
-    append_wrapper_log(wrapper_log, f"completed_at: {utc_timestamp()}\nexit_code: {result.returncode}\n")
-    return result.returncode
+        return run_streaming_pi(command, config, paths, report_abs, signal_abs)
+    return run_non_streaming_pi(command, config, paths, report_abs, signal_abs)
 
 
 def build_pi_command(config: LaunchConfig, skills: Sequence[ResolvedSkill], prompt: str) -> list[str]:
@@ -341,6 +398,12 @@ def build_pi_command(config: LaunchConfig, skills: Sequence[ResolvedSkill], prom
     command = [config.pi_bin]
     if config.stream:
         command.extend(["--mode", "json"])
+    if not config.allow_extensions:
+        command.append("--no-extensions")
+    for extension in config.extensions:
+        command.extend(["--extension", extension])
+    if config.tools:
+        command.extend(["--tools", config.tools])
     command.extend(["--model", config.model])
     if config.thinking:
         command.extend(["--thinking", config.thinking])
@@ -352,68 +415,42 @@ def build_pi_command(config: LaunchConfig, skills: Sequence[ResolvedSkill], prom
 
 def run_streaming_pi(
     command: Sequence[str],
-    cwd: Path,
-    stdout_log: Path,
-    stderr_log: Path,
-    events_log: Path,
-    raw_events_log: Path,
-    wrapper_log: Path,
-    raw_events: bool,
-    startup_timeout: float,
-    shutdown_timeout: float,
+    config: LaunchConfig,
+    paths: LaunchPaths,
+    report_abs: Path,
+    signal_abs: Path,
 ) -> int:
-    """Run pi while teeing child streams to logs and wrapper stderr."""
-    try:
-        process = subprocess.Popen(
-            command,
-            cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            start_new_session=True,
-        )
-    except OSError as error:
-        stdout_log.write_text("")
-        stderr_log.write_text(f"failed to execute pi: {error}\n")
-        events_log.write_text("")
-        if raw_events_log.exists():
-            raw_events_log.unlink()
-        append_wrapper_log(wrapper_log, f"failed_at: {utc_timestamp()}\nerror: failed to execute pi: {error}\n")
-        raise PiBashError(f"failed to execute pi: {error}") from error
-
-    append_wrapper_log(
-        wrapper_log,
-        f"spawned_at: {utc_timestamp()}\nchild_pid: {process.pid}\nprocess_group_id: {process.pid}\n",
-    )
-
+    """Run pi in JSON stream mode with supervised diagnostics."""
+    process = spawn_pi_process(command, config, paths)
     if process.stdout is None or process.stderr is None:
-        terminate_process_group(process, shutdown_timeout, wrapper_log)
+        terminate_process_group(process, config.shutdown_timeout, paths.wrapper_log)
         raise PiBashError("failed to capture pi stdout/stderr")
 
     stderr_lock = Lock()
     first_output = Event()
-    if not raw_events and raw_events_log.exists():
-        raw_events_log.unlink()
+    activity = OutputActivity(last_output_monotonic=time.monotonic(), lock=Lock())
+    if not config.raw_events and paths.raw_events_log.exists():
+        paths.raw_events_log.unlink()
     raw_events_file: TextIO | None = None
-    with stdout_log.open("w", encoding="utf-8", buffering=1) as stdout_file, stderr_log.open(
+    with paths.stdout_log.open("w", encoding="utf-8", buffering=1) as stdout_file, paths.stderr_log.open(
         "w",
         encoding="utf-8",
         buffering=1,
-    ) as stderr_file, events_log.open("w", encoding="utf-8", buffering=1) as events_file:
-        stdout_file.write(stream_stdout_notice(events_log, raw_events_log if raw_events else None))
+    ) as stderr_file, paths.events_log.open("w", encoding="utf-8", buffering=1) as events_file:
+        stdout_file.write(stream_stdout_notice(paths.events_log, paths.raw_events_log if config.raw_events else None))
         stdout_file.flush()
-        if raw_events:
-            raw_events_file = raw_events_log.open("w", encoding="utf-8", buffering=1)
+        emit_wrapper_diagnostic(spawn_notice(process, config, paths), stderr_file, stderr_lock, paths.wrapper_log)
+        if config.raw_events:
+            raw_events_file = paths.raw_events_log.open("w", encoding="utf-8", buffering=1)
         try:
             stdout_thread = Thread(
                 target=tee_stdout_stream,
-                args=(process.stdout, stdout_file, events_file, raw_events_file, stderr_lock, first_output),
+                args=(process.stdout, stdout_file, events_file, raw_events_file, stderr_lock, first_output, activity),
                 daemon=True,
             )
             stderr_thread = Thread(
                 target=tee_stderr_stream,
-                args=(process.stderr, (stderr_file,), stderr_lock, first_output),
+                args=(process.stderr, (stderr_file,), stderr_lock, first_output, activity, True),
                 daemon=True,
             )
             threads = (stdout_thread, stderr_thread)
@@ -423,37 +460,121 @@ def run_streaming_pi(
                 enforce_startup_timeout(
                     process=process,
                     first_output=first_output,
-                    startup_timeout=startup_timeout,
+                    startup_timeout=config.startup_timeout,
                     stderr_file=stderr_file,
                     stderr_lock=stderr_lock,
-                    wrapper_log=wrapper_log,
-                    shutdown_timeout=shutdown_timeout,
+                    wrapper_log=paths.wrapper_log,
+                    shutdown_timeout=config.shutdown_timeout,
                 )
-                return_code = process.wait()
-                if not join_stream_threads(threads, shutdown_timeout):
-                    emit_wrapper_diagnostic(
-                        "stream readers did not finish after child exit; terminating process group descendants\n",
-                        stderr_file,
-                        stderr_lock,
-                        wrapper_log,
-                    )
-                    signal_process_group(process.pid, SIGTERM, wrapper_log)
-                    if not join_stream_threads(threads, shutdown_timeout):
-                        signal_process_group(process.pid, SIGKILL, wrapper_log)
-                        if not join_stream_threads(threads, shutdown_timeout):
-                            raise PiBashError(
-                                f"stream readers did not finish after child exit; see {stdout_log} and {stderr_log}"
-                            )
+                return_code = wait_for_supervised_process(
+                    process=process,
+                    config=config,
+                    paths=paths,
+                    report_abs=report_abs,
+                    signal_abs=signal_abs,
+                    stderr_file=stderr_file,
+                    stderr_lock=stderr_lock,
+                    activity=activity,
+                )
+                ensure_stream_threads_finished(process, threads, config, paths, stderr_file, stderr_lock)
             except Exception:
                 if process.poll() is None:
-                    terminate_process_group(process, shutdown_timeout, wrapper_log)
-                join_stream_threads(threads, shutdown_timeout)
+                    terminate_process_group(process, config.shutdown_timeout, paths.wrapper_log)
+                join_stream_threads(threads, config.shutdown_timeout)
                 raise
         finally:
             if raw_events_file is not None:
                 raw_events_file.close()
-    append_wrapper_log(wrapper_log, f"completed_at: {utc_timestamp()}\nexit_code: {return_code}\n")
+    append_wrapper_log(paths.wrapper_log, f"completed_at: {utc_timestamp()}\nexit_code: {return_code}\n")
+    write_latest_manifest(paths, config, command, "completed", child_pid=process.pid, exit_code=return_code)
     return return_code
+
+
+def run_non_streaming_pi(
+    command: Sequence[str],
+    config: LaunchConfig,
+    paths: LaunchPaths,
+    report_abs: Path,
+    signal_abs: Path,
+) -> int:
+    """Run pi text mode with supervised diagnostics and attempt-scoped capture."""
+    process = spawn_pi_process(command, config, paths)
+    if process.stdout is None or process.stderr is None:
+        terminate_process_group(process, config.shutdown_timeout, paths.wrapper_log)
+        raise PiBashError("failed to capture pi stdout/stderr")
+
+    stderr_lock = Lock()
+    activity = OutputActivity(last_output_monotonic=time.monotonic(), lock=Lock())
+    with paths.stdout_log.open("w", encoding="utf-8", buffering=1) as stdout_file, paths.stderr_log.open(
+        "w",
+        encoding="utf-8",
+        buffering=1,
+    ) as stderr_file:
+        emit_wrapper_diagnostic(spawn_notice(process, config, paths), stderr_file, stderr_lock, paths.wrapper_log)
+        stdout_thread = Thread(
+            target=tee_plain_stream,
+            args=(process.stdout, (stdout_file,), activity),
+            daemon=True,
+        )
+        stderr_thread = Thread(
+            target=tee_plain_stream,
+            args=(process.stderr, (stderr_file,), activity),
+            daemon=True,
+        )
+        threads = (stdout_thread, stderr_thread)
+        stdout_thread.start()
+        stderr_thread.start()
+        try:
+            return_code = wait_for_supervised_process(
+                process=process,
+                config=config,
+                paths=paths,
+                report_abs=report_abs,
+                signal_abs=signal_abs,
+                stderr_file=stderr_file,
+                stderr_lock=stderr_lock,
+                activity=activity,
+            )
+            ensure_stream_threads_finished(process, threads, config, paths, stderr_file, stderr_lock)
+        except Exception:
+            if process.poll() is None:
+                terminate_process_group(process, config.shutdown_timeout, paths.wrapper_log)
+            join_stream_threads(threads, config.shutdown_timeout)
+            raise
+    append_wrapper_log(paths.wrapper_log, f"completed_at: {utc_timestamp()}\nexit_code: {return_code}\n")
+    write_latest_manifest(paths, config, command, "completed", child_pid=process.pid, exit_code=return_code)
+    return return_code
+
+
+def spawn_pi_process(command: Sequence[str], config: LaunchConfig, paths: LaunchPaths) -> subprocess.Popen[str]:
+    """Spawn pi in its own process group and record attempt metadata."""
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=config.cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            start_new_session=True,
+        )
+    except OSError as error:
+        paths.stdout_log.write_text("")
+        paths.stderr_log.write_text(f"failed to execute pi: {error}\n")
+        if config.stream:
+            paths.events_log.write_text("")
+        if paths.raw_events_log.exists():
+            paths.raw_events_log.unlink()
+        append_wrapper_log(paths.wrapper_log, f"failed_at: {utc_timestamp()}\nerror: failed to execute pi: {error}\n")
+        write_latest_manifest(paths, config, command, "spawn_failed", error=str(error))
+        raise PiBashError(f"failed to execute pi: {error}") from error
+
+    append_wrapper_log(
+        paths.wrapper_log,
+        f"spawned_at: {utc_timestamp()}\nchild_pid: {process.pid}\nprocess_group_id: {process.pid}\n",
+    )
+    write_latest_manifest(paths, config, command, "spawned", child_pid=process.pid)
+    return process
 
 
 def stream_stdout_notice(events_log: Path, raw_events_log: Path | None) -> str:
@@ -473,10 +594,12 @@ def tee_stdout_stream(
     raw_events_file: TextIO | None,
     stderr_lock: Lock,
     first_output: Event,
+    activity: OutputActivity,
 ) -> None:
     """Copy child stdout into lean event logs while avoiding raw JSON duplication."""
     for chunk in source:
         first_output.set()
+        activity.mark()
         if raw_events_file is not None:
             raw_events_file.write(chunk)
             raw_events_file.flush()
@@ -499,16 +622,29 @@ def tee_stderr_stream(
     log_files: Sequence[TextIO],
     stderr_lock: Lock,
     first_output: Event,
+    activity: OutputActivity,
+    mirror: bool,
 ) -> None:
-    """Copy child stderr to logs and wrapper stderr."""
+    """Copy child stderr to logs and optionally wrapper stderr."""
     for chunk in source:
         first_output.set()
+        activity.mark()
         for log_file in log_files:
             log_file.write(chunk)
             log_file.flush()
-        with stderr_lock:
-            sys.stderr.write(chunk)
-            sys.stderr.flush()
+        if mirror:
+            with stderr_lock:
+                sys.stderr.write(chunk)
+                sys.stderr.flush()
+
+
+def tee_plain_stream(source: TextIO, log_files: Sequence[TextIO], activity: OutputActivity) -> None:
+    """Copy child stream to log files without mirroring raw output to wrapper stderr."""
+    for chunk in source:
+        activity.mark()
+        for log_file in log_files:
+            log_file.write(chunk)
+            log_file.flush()
 
 
 def lean_event_line(raw_line: str) -> str | None:
@@ -556,6 +692,167 @@ def redacted_event_summary(value: object) -> dict[str, object]:
     if value is None:
         return {"redacted": "null"}
     return {"redacted": type(value).__name__}
+
+
+def wait_for_supervised_process(
+    *,
+    process: subprocess.Popen[str],
+    config: LaunchConfig,
+    paths: LaunchPaths,
+    report_abs: Path,
+    signal_abs: Path,
+    stderr_file: TextIO,
+    stderr_lock: Lock,
+    activity: OutputActivity,
+) -> int:
+    """Wait for child exit while emitting bounded wrapper diagnostics."""
+    started = time.monotonic()
+    next_heartbeat = started + config.heartbeat_interval if config.heartbeat_interval > 0 else float("inf")
+    while True:
+        return_code = process.poll()
+        if return_code is not None:
+            return return_code
+
+        elapsed = time.monotonic() - started
+        if config.runtime_timeout > 0 and elapsed >= config.runtime_timeout:
+            emit_supervision_snapshot(
+                "runtime timeout reached; terminating child process group",
+                process,
+                config,
+                paths,
+                report_abs,
+                signal_abs,
+                elapsed,
+                activity,
+                stderr_file,
+                stderr_lock,
+            )
+            terminate_process_group(process, config.shutdown_timeout, paths.wrapper_log)
+            raise PiBashError(f"pi exceeded runtime timeout {config.runtime_timeout:g}s; see wrapper log")
+
+        idle = activity.idle_seconds()
+        if config.idle_timeout > 0 and idle >= config.idle_timeout:
+            emit_supervision_snapshot(
+                "idle timeout reached; terminating child process group",
+                process,
+                config,
+                paths,
+                report_abs,
+                signal_abs,
+                elapsed,
+                activity,
+                stderr_file,
+                stderr_lock,
+            )
+            terminate_process_group(process, config.shutdown_timeout, paths.wrapper_log)
+            raise PiBashError(f"pi produced no child output for {config.idle_timeout:g}s; see wrapper log")
+
+        if time.monotonic() >= next_heartbeat:
+            include_snapshot = config.hang_snapshot_after > 0 and elapsed >= config.hang_snapshot_after
+            if include_snapshot:
+                emit_supervision_snapshot(
+                    "child still running",
+                    process,
+                    config,
+                    paths,
+                    report_abs,
+                    signal_abs,
+                    elapsed,
+                    activity,
+                    stderr_file,
+                    stderr_lock,
+                )
+            else:
+                emit_wrapper_diagnostic(
+                    f"pi-bash heartbeat: child pid={process.pid} elapsed={elapsed:.1f}s idle={idle:.1f}s\n",
+                    stderr_file,
+                    stderr_lock,
+                    paths.wrapper_log,
+                )
+            next_heartbeat = time.monotonic() + config.heartbeat_interval
+        time.sleep(0.25)
+
+
+def emit_supervision_snapshot(
+    reason: str,
+    process: subprocess.Popen[str],
+    config: LaunchConfig,
+    paths: LaunchPaths,
+    report_abs: Path,
+    signal_abs: Path,
+    elapsed: float,
+    activity: OutputActivity,
+    stderr_file: TextIO,
+    stderr_lock: Lock,
+) -> None:
+    """Emit sanitized process, artifact, and pi-session state for hung children."""
+    lines = [
+        f"pi-bash snapshot: {reason}",
+        f"attempt_id: {config.attempt_id}",
+        f"child_pid: {process.pid}",
+        f"elapsed_seconds: {elapsed:.1f}",
+        f"idle_seconds: {activity.idle_seconds():.1f}",
+        f"stdout_log_bytes: {path_size(paths.stdout_log)}",
+        f"stderr_log_bytes: {path_size(paths.stderr_log)}",
+        f"events_log_bytes: {path_size(paths.events_log)}",
+        f"report: {artifact_state(report_abs)}",
+        f"signal: {artifact_state(signal_abs)}",
+        format_process_tree(process.pid),
+        format_session_diagnostics(config, paths.wrapper_log),
+        "",
+    ]
+    emit_wrapper_diagnostic("\n".join(lines), stderr_file, stderr_lock, paths.wrapper_log)
+
+
+def ensure_stream_threads_finished(
+    process: subprocess.Popen[str],
+    threads: Sequence[Thread],
+    config: LaunchConfig,
+    paths: LaunchPaths,
+    stderr_file: TextIO,
+    stderr_lock: Lock,
+) -> None:
+    """Bound stream-reader shutdown and clean descendants if pipes remain open."""
+    if join_stream_threads(threads, config.shutdown_timeout):
+        return
+    emit_wrapper_diagnostic(
+        "stream readers did not finish after child exit; terminating process group descendants\n",
+        stderr_file,
+        stderr_lock,
+        paths.wrapper_log,
+    )
+    signal_process_group(process.pid, SIGTERM, paths.wrapper_log)
+    if join_stream_threads(threads, config.shutdown_timeout):
+        return
+    signal_process_group(process.pid, SIGKILL, paths.wrapper_log)
+    if not join_stream_threads(threads, config.shutdown_timeout):
+        raise PiBashError(f"stream readers did not finish after child exit; see {paths.stdout_log} and {paths.stderr_log}")
+
+
+def spawn_notice(process: subprocess.Popen[str], config: LaunchConfig, paths: LaunchPaths) -> str:
+    """Return a sanitized one-line spawn notice for background Bash visibility."""
+    startup = "disabled" if config.startup_timeout <= 0 else f"{config.startup_timeout:g}s"
+    return (
+        f"pi-bash: spawned pid={process.pid} attempt={config.attempt_id} stream={config.stream} "
+        f"events={paths.events_log} startup-timeout={startup}\n"
+    )
+
+
+def path_size(path: Path) -> int:
+    """Return file size or zero when absent."""
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
+def artifact_state(path: Path) -> str:
+    """Return compact artifact existence/size state."""
+    if not path.exists():
+        return f"missing {path}"
+    if not path.is_file():
+        return f"not-file {path}"
+    return f"present size={path_size(path)} path={path}"
 
 
 def enforce_startup_timeout(
@@ -635,32 +932,75 @@ def write_launch_metadata(
     command: Sequence[str],
     prompt: str,
     skill_count: int,
-    stdout_log: Path,
-    stderr_log: Path,
-    events_log: Path,
-    raw_events_log: Path,
+    paths: LaunchPaths,
 ) -> None:
     """Write wrapper-side launch diagnostics before child output exists."""
     wrapper_log.parent.mkdir(parents=True, exist_ok=True)
     metadata = [
         f"started_at: {utc_timestamp()}",
         f"agent_id: {config.agent_id}",
+        f"attempt_id: {config.attempt_id}",
         f"stream: {config.stream}",
         f"raw_events: {config.raw_events}",
+        f"allow_extensions: {config.allow_extensions}",
+        f"extension_count: {len(config.extensions)}",
+        f"tools: {config.tools or ''}",
         f"model: {config.model}",
         f"thinking: {config.thinking or ''}",
         f"startup_timeout_seconds: {config.startup_timeout:g}",
         f"shutdown_timeout_seconds: {config.shutdown_timeout:g}",
+        f"heartbeat_interval_seconds: {config.heartbeat_interval:g}",
+        f"hang_snapshot_after_seconds: {config.hang_snapshot_after:g}",
+        f"runtime_timeout_seconds: {config.runtime_timeout:g}",
+        f"idle_timeout_seconds: {config.idle_timeout:g}",
         f"prompt_bytes: {len(prompt.encode('utf-8'))}",
         f"skill_count: {skill_count}",
-        f"stdout_log: {stdout_log}",
-        f"stderr_log: {stderr_log}",
-        f"events_log: {events_log}",
-        f"raw_events_log: {raw_events_log if config.raw_events else ''}",
+        f"stdout_log: {paths.stdout_log}",
+        f"stderr_log: {paths.stderr_log}",
+        f"events_log: {paths.events_log}",
+        f"raw_events_log: {paths.raw_events_log if config.raw_events else ''}",
+        f"latest_manifest: {paths.latest_manifest}",
         f"command: {render_command_preview(command)}",
         "",
     ]
     wrapper_log.write_text("\n".join(metadata), encoding="utf-8")
+
+
+def write_latest_manifest(
+    paths: LaunchPaths,
+    config: LaunchConfig,
+    command: Sequence[str],
+    status: str,
+    *,
+    child_pid: int | None = None,
+    exit_code: int | None = None,
+    error: str | None = None,
+) -> None:
+    """Write the latest-attempt manifest without exposing prompt text."""
+    payload: dict[str, object] = {
+        "agent_id": config.agent_id,
+        "attempt_id": config.attempt_id,
+        "updated_at": utc_timestamp(),
+        "status": status,
+        "cwd": str(config.cwd),
+        "stream": config.stream,
+        "model": config.model,
+        "thinking": config.thinking,
+        "command": render_command_preview(command),
+        "stdout_log": str(paths.stdout_log),
+        "stderr_log": str(paths.stderr_log),
+        "events_log": str(paths.events_log),
+        "raw_events_log": str(paths.raw_events_log) if config.raw_events else "",
+        "wrapper_log": str(paths.wrapper_log),
+    }
+    if child_pid is not None:
+        payload["child_pid"] = child_pid
+    if exit_code is not None:
+        payload["exit_code"] = exit_code
+    if error is not None:
+        payload["error"] = error
+    paths.latest_manifest.parent.mkdir(parents=True, exist_ok=True)
+    paths.latest_manifest.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def append_wrapper_log(wrapper_log: Path, message: str) -> None:
@@ -795,6 +1135,117 @@ def utc_timestamp() -> str:
     return dt.datetime.now(dt.UTC).isoformat()
 
 
+def build_attempt_id() -> str:
+    """Return a filesystem-safe attempt id for preserving retry evidence."""
+    timestamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
+    return f"{timestamp}-p{os.getpid()}"
+
+
+def format_session_diagnostics(config: LaunchConfig, marker_path: Path) -> str:
+    """Summarize newest pi session state for this attempt's cwd, if available."""
+    session_dir = pi_session_dir(config.cwd)
+    if not session_dir.exists():
+        return f"pi_session: none session_dir={session_dir}"
+    try:
+        cutoff = marker_path.stat().st_mtime - 5.0
+    except OSError:
+        cutoff = time.time() - 5.0
+    candidates = sorted(
+        (path for path in session_dir.glob("*.jsonl") if path.is_file() and path.stat().st_mtime >= cutoff),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if not candidates:
+        return f"pi_session: none_since_attempt session_dir={session_dir}"
+    newest = candidates[0]
+    return summarize_session_file(newest)
+
+
+def pi_session_dir(cwd: Path) -> Path:
+    """Return pi's cwd-scoped session directory path."""
+    agent_dir = Path(os.environ.get("PI_CODING_AGENT_DIR", "~/.pi/agent")).expanduser()
+    encoded = "--" + str(cwd).strip("/").replace("/", "-") + "--"
+    return agent_dir / "sessions" / encoded
+
+
+def summarize_session_file(path: Path) -> str:
+    """Return a compact sanitized summary of a pi JSONL session tail."""
+    last_event: dict[str, object] | None = None
+    last_tool_call: dict[str, object] | None = None
+    for line in tail_file_lines(path, MAX_SESSION_TAIL_BYTES, MAX_SESSION_TAIL_LINES):
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict):
+            last_event = event
+            tool_call = find_tool_call(event)
+            if tool_call is not None:
+                last_tool_call = tool_call
+    if last_event is None:
+        return f"pi_session: {path} last_event=unreadable"
+    parts = [f"pi_session: {path}", f"last_event: {summarize_session_event(last_event)}"]
+    if last_tool_call is not None:
+        parts.append(f"last_tool_call: {summarize_tool_call(last_tool_call)}")
+    return "\n".join(parts)
+
+
+def tail_file_lines(path: Path, max_bytes: int, max_lines: int) -> list[str]:
+    """Read a bounded tail of a text file."""
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as file:
+            if size > max_bytes:
+                file.seek(-max_bytes, os.SEEK_END)
+                file.readline()
+            data = file.read()
+    except OSError:
+        return []
+    return data.decode("utf-8", errors="replace").splitlines()[-max_lines:]
+
+
+def find_tool_call(event: dict[str, object]) -> dict[str, object] | None:
+    """Find the last tool call object inside a pi session event."""
+    message = event.get("message")
+    if not isinstance(message, dict):
+        return None
+    content = message.get("content")
+    if not isinstance(content, list):
+        return None
+    for item in reversed(content):
+        if isinstance(item, dict) and item.get("type") == "toolCall":
+            return item
+    return None
+
+
+def summarize_session_event(event: dict[str, object]) -> str:
+    """Summarize a pi session event without raw message content."""
+    event_type = str(event.get("type", "unknown"))
+    timestamp = str(event.get("timestamp", ""))
+    message = event.get("message")
+    if isinstance(message, dict):
+        role = str(message.get("role", ""))
+        stop_reason = str(message.get("stopReason", ""))
+        return f"type={event_type} role={role} stopReason={stop_reason} timestamp={timestamp}"
+    return f"type={event_type} timestamp={timestamp}"
+
+
+def summarize_tool_call(tool_call: dict[str, object]) -> str:
+    """Summarize a tool call with sensitive values redacted."""
+    name = str(tool_call.get("name", "unknown"))
+    arguments = tool_call.get("arguments")
+    if isinstance(arguments, dict):
+        keys = sorted(str(key) for key in arguments.keys())
+        timeout = arguments.get("timeout", "<none>")
+        command = arguments.get("command")
+        command_summary = ""
+        if isinstance(command, str):
+            command_summary = f" command_sha256={hashlib.sha256(command.encode()).hexdigest()}"
+            command_summary += f" command_preview={shlex.quote(truncate_text(command, 160))}"
+        return f"name={name} keys={keys} timeout={timeout}{command_summary}"
+    return f"name={name} arguments={redacted_event_summary(arguments)}"
+
+
 def build_worker_prompt(config: LaunchConfig, skills: Sequence[ResolvedSkill]) -> str:
     """Synthesize the programmatic pi worker prompt from wrapper arguments."""
     mux_root = Path(__file__).resolve().parent.parent
@@ -819,6 +1270,12 @@ def build_worker_prompt(config: LaunchConfig, skills: Sequence[ResolvedSkill]) -
         "After successful report and signal creation, your final textual response must be exactly `0`.",
         "Do not launch nested subagents.",
         "Do not use control-plane bridge tools or `report_parent`.",
+        "",
+        "## Bash safety for programmatic workers",
+        "- Never run long-lived servers, watchers, or interactive commands in the foreground.",
+        "- Every Bash command that can hang must include an explicit timeout or a background PID cleanup recipe.",
+        "- For dev servers: start in the background, write logs to a declared file, wait with a bounded readiness loop, run checks, then kill the PID.",
+        "- If a required command has no safe bounded form, document the deferral in the report instead of hanging.",
         "",
         "## Declared dispatch",
         f"- Role: {config.role}",
@@ -1014,17 +1471,20 @@ def skill_directory_content_path(path: Path) -> Path:
     return markdown_files[0]
 
 
-def log_paths(cwd: Path, session_dir: str, agent_id: str) -> tuple[Path, Path, Path, Path, Path]:
-    """Return stdout, stderr, lean event, raw event, and wrapper log paths for the worker."""
+def log_paths(cwd: Path, session_dir: str, agent_id: str, attempt_id: str) -> LaunchPaths:
+    """Return attempt-scoped log paths for the worker."""
     session_abs = resolve_project_path(cwd, session_dir)
     safe_name = safe_log_name(agent_id)
+    safe_attempt = safe_log_name(attempt_id)
     logs_dir = session_abs / "logs"
-    return (
-        logs_dir / f"{safe_name}.stdout.log",
-        logs_dir / f"{safe_name}.stderr.log",
-        logs_dir / f"{safe_name}.events.jsonl",
-        logs_dir / f"{safe_name}.raw-events.jsonl",
-        logs_dir / f"{safe_name}.wrapper.log",
+    prefix = f"{safe_name}.{safe_attempt}"
+    return LaunchPaths(
+        stdout_log=logs_dir / f"{prefix}.stdout.log",
+        stderr_log=logs_dir / f"{prefix}.stderr.log",
+        events_log=logs_dir / f"{prefix}.events.jsonl",
+        raw_events_log=logs_dir / f"{prefix}.raw-events.jsonl",
+        wrapper_log=logs_dir / f"{prefix}.wrapper.log",
+        latest_manifest=logs_dir / f"{safe_name}.latest.json",
     )
 
 
