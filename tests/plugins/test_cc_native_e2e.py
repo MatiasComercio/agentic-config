@@ -40,6 +40,19 @@ KEY_SKILLS = {
 }
 
 
+def direct_skill_dirs(plugin: str) -> list[Path]:
+    """Return one-level Claude skill dirs that contain SKILL.md."""
+    skills_dir = PLUGINS_DIR / plugin / "skills"
+    if not skills_dir.exists():
+        return []
+    return [d for d in skills_dir.iterdir() if d.is_dir() and (d / "SKILL.md").exists()]
+
+
+def direct_skill_names(plugin: str) -> set[str]:
+    """Return directly discoverable Claude skill names."""
+    return {skill_dir.name for skill_dir in direct_skill_dirs(plugin)}
+
+
 class TestPluginDirStructure(unittest.TestCase):
     """Validate each plugin has the structure CC expects for auto-discovery."""
 
@@ -71,11 +84,10 @@ class TestPluginDirStructure(unittest.TestCase):
             skills_dir = PLUGINS_DIR / plugin / "skills"
             if not skills_dir.exists():
                 continue
-            for skill_dir in skills_dir.iterdir():
-                if skill_dir.is_dir():
-                    self.assertTrue(
-                        (skill_dir / "SKILL.md").exists(),
-                        f"{plugin}/{skill_dir.name}: missing SKILL.md")
+            for skill_dir in direct_skill_dirs(plugin):
+                self.assertTrue(
+                    (skill_dir / "SKILL.md").exists(),
+                    f"{plugin}/{skill_dir.name}: missing SKILL.md")
 
 
 class TestNoDuplicateSkills(unittest.TestCase):
@@ -88,13 +100,11 @@ class TestNoDuplicateSkills(unittest.TestCase):
             skills_dir = PLUGINS_DIR / plugin / "skills"
             if not skills_dir.exists():
                 continue
-            for skill_dir in skills_dir.iterdir():
-                if skill_dir.is_dir():
-                    name = skill_dir.name
-                    if name in seen:
-                        duplicates.append(
-                            f"'{name}' in both {seen[name]} and {plugin}")
-                    seen[name] = plugin
+            for name in direct_skill_names(plugin):
+                if name in seen:
+                    duplicates.append(
+                        f"'{name}' in both {seen[name]} and {plugin}")
+                seen[name] = plugin
         self.assertEqual(duplicates, [], "\n".join(duplicates))
 
 
@@ -157,7 +167,7 @@ class TestKeySkillsResolvable(unittest.TestCase):
         for plugin in EXPECTED_PLUGINS:
             skills_dir = PLUGINS_DIR / plugin / "skills"
             if skills_dir.exists():
-                all_skills.update(d.name for d in skills_dir.iterdir() if d.is_dir())
+                all_skills.update(direct_skill_names(plugin))
         missing = KEY_SKILLS - all_skills
         self.assertEqual(missing, set(),
                          f"Key skills not found: {missing}")

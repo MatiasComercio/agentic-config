@@ -135,7 +135,7 @@ def main() -> None:
         name = p.get("name", "?")
         skills_dir = root / "plugins" / name / "skills"
         if skills_dir.exists():
-            skill_count = len([d for d in skills_dir.iterdir() if d.is_dir()])
+            skill_count = len([d for d in skills_dir.iterdir() if d.is_dir() and (d / "SKILL.md").exists()])
             check(f"{name}: has skills", skill_count > 0, f"found {skill_count}")
 
     # --- No legacy names in test files ---

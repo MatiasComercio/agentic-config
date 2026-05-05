@@ -49,6 +49,27 @@ def test_generator_covers_current_canonical_scope() -> None:
     assert (PROJECT_ROOT / "canonical" / "ac-workflow" / "skills" / "mux-subagent" / "skill.yaml").exists()
 
 
+def test_generator_ships_claude_and_pi_skill_paths_for_every_canonical_skill() -> None:
+    """Every canonical ac-* skill should exist at direct, namespaced Claude, and pi paths."""
+    for skill_yaml in sorted(PROJECT_ROOT.glob("canonical/ac-*/skills/*/skill.yaml")):
+        plugin = skill_yaml.parents[2].name
+        skill = skill_yaml.parent.name
+        direct_claude = PROJECT_ROOT / "plugins" / plugin / "skills" / skill / "SKILL.md"
+        namespaced_claude = PROJECT_ROOT / "plugins" / plugin / "skills" / plugin / skill / "SKILL.md"
+        pi_skill = PROJECT_ROOT / "packages" / f"pi-{plugin}" / "skills" / f"{plugin}-{skill}" / "SKILL.md"
+
+        assert direct_claude.exists(), f"missing direct Claude skill: {direct_claude}"
+        assert namespaced_claude.exists(), f"missing namespaced Claude skill: {namespaced_claude}"
+        assert pi_skill.exists(), f"missing pi skill: {pi_skill}"
+        assert namespaced_claude.read_text() == direct_claude.read_text()
+
+    assert (PROJECT_ROOT / "plugins" / "ac-qa" / "skills" / "ac-qa" / "playwright-cli" / "SKILL.md").exists()
+    assert (
+        PROJECT_ROOT / "plugins" / "ac-qa" / "skills" / "ac-qa" / "playwright-cli" / "resources" / "session-management.md"
+    ).exists()
+    assert not (PROJECT_ROOT / "plugins" / "ac-tools" / "skills" / "scripts" / "video-query.py").exists()
+
+
 def test_generator_plugin_filter_stays_within_seeded_scope() -> None:
     """Plugin filtering should cover the canonical workflow scope without reintroducing removed manual siblings."""
     result = run_generator("--check", "--plugin", "ac-workflow")

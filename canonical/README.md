@@ -75,6 +75,7 @@ uv run python tools/generate_canonical_wrappers.py --plugin ac-workflow
 
 For the declared canonical scope, the generator owns:
 - Claude skill outputs under `plugins/<plugin>/skills/<skill>/SKILL.md`
+- Claude compatibility aliases under `plugins/<plugin>/skills/<plugin>/<skill>/SKILL.md`
 - pi skill outputs under `packages/pi-<plugin>/skills/<plugin>-<skill>/SKILL.md`
 - package-shared copied support trees
 - skill-local copied support trees

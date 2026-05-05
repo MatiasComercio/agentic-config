@@ -490,9 +490,9 @@ def plan_skill_outputs(
         if not body_template_path.exists():
             raise GeneratorError(f"missing body file for {skill.skill_id}/{harness}: {body_template_path}")
         body_template = body_template_path.read_text()
-        destination_path = harness_root(repo_root, package, harness) / render.output_path
         markdown = render_skill_markdown(package, skill, render, body_template)
-        queue_text_write(destination_path, markdown, planned_writes)
+        for destination_path in render_output_paths(repo_root, package, skill, render):
+            queue_text_write(destination_path, markdown, planned_writes)
 
 
 def plan_skill_assets(
@@ -510,10 +510,45 @@ def plan_skill_assets(
             render = skill.renders.get(harness)
             if render is None or render.status == "deferred":
                 continue
-            skill_output_root = (harness_root(repo_root, package, harness) / render.output_path).parent
-            destination_root = skill_output_root / relative_destination
             replacements = build_placeholder_replacements(package, harness, render.placeholder_values)
-            queue_tree_copy(source_root, destination_root, planned_writes, replacements)
+            for skill_output_root in render_asset_output_roots(repo_root, package, skill, render, relative_destination):
+                destination_root = skill_output_root / relative_destination
+                queue_tree_copy(source_root, destination_root, planned_writes, replacements)
+
+
+def render_output_paths(
+    repo_root: Path,
+    package: PackageConfig,
+    skill: SkillConfig,
+    render: RenderConfig,
+) -> tuple[Path, ...]:
+    """Return all generated SKILL.md paths for one render."""
+    primary_path = harness_root(repo_root, package, render.harness) / render.output_path
+    paths = [primary_path]
+    if render.harness == "claude":
+        paths.append(harness_root(repo_root, package, render.harness) / "skills" / package.plugin_id / skill.skill_id / "SKILL.md")
+    return tuple(dict.fromkeys(paths))
+
+
+def render_asset_output_roots(
+    repo_root: Path,
+    package: PackageConfig,
+    skill: SkillConfig,
+    render: RenderConfig,
+    relative_destination: str,
+) -> tuple[Path, ...]:
+    """Return generated skill roots that should receive a skill-local asset tree."""
+    primary_root = (harness_root(repo_root, package, render.harness) / render.output_path).parent
+    roots = [primary_root]
+    if render.harness == "claude" and is_local_asset_destination(relative_destination):
+        roots.extend(path.parent for path in render_output_paths(repo_root, package, skill, render)[1:])
+    return tuple(dict.fromkeys(roots))
+
+
+def is_local_asset_destination(relative_destination: str) -> bool:
+    """Return True when an asset destination stays inside the generated skill dir."""
+    destination_path = Path(relative_destination)
+    return not destination_path.is_absolute() and ".." not in destination_path.parts
 
 
 def render_skill_markdown(

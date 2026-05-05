@@ -51,6 +51,19 @@ EXPECTED_SKILLS = {
     "ac-audit": {"configure-audit"},
 }
 
+
+def direct_skill_names(plugin: str) -> set[str]:
+    """Return one-level Claude skill directories that contain SKILL.md."""
+    skills_dir = PLUGINS_DIR / plugin / "skills"
+    if not skills_dir.exists():
+        return set()
+    return {d.name for d in skills_dir.iterdir() if d.is_dir() and (d / "SKILL.md").exists()}
+
+
+def namespaced_skill_path(plugin: str, skill: str) -> Path:
+    """Return the generated compatibility path for plugin-qualified skill refs."""
+    return PLUGINS_DIR / plugin / "skills" / plugin / skill / "SKILL.md"
+
 # Patterns that indicate internal library dependencies (strictly forbidden)
 FORBIDDEN_PATTERNS = [
     r'AGENTIC_GLOBAL',
@@ -111,7 +124,7 @@ class TestSkillDistribution(unittest.TestCase):
             skills_dir = PLUGINS_DIR / plugin / "skills"
             if expected:
                 self.assertTrue(skills_dir.exists(), f"Missing skills/ for {plugin}")
-                actual = {d.name for d in skills_dir.iterdir() if d.is_dir()}
+                actual = direct_skill_names(plugin)
                 self.assertEqual(actual, expected, f"Skill mismatch for {plugin}")
             # If no skills expected, skills/ dir may not exist (OK)
 
@@ -120,12 +133,20 @@ class TestSkillDistribution(unittest.TestCase):
             skills_dir = PLUGINS_DIR / plugin / "skills"
             if not skills_dir.exists():
                 continue
-            for skill_dir in skills_dir.iterdir():
-                if skill_dir.is_dir():
-                    self.assertTrue(
-                        (skill_dir / "SKILL.md").exists(),
-                        f"Missing SKILL.md in {skill_dir}",
-                    )
+            for skill_name in direct_skill_names(plugin):
+                skill_dir = skills_dir / skill_name
+                self.assertTrue(
+                    (skill_dir / "SKILL.md").exists(),
+                    f"Missing SKILL.md in {skill_dir}",
+                )
+
+    def test_each_skill_has_namespaced_compatibility_path(self) -> None:
+        for plugin, skills in EXPECTED_SKILLS.items():
+            for skill in skills:
+                self.assertTrue(
+                    namespaced_skill_path(plugin, skill).exists(),
+                    f"Missing namespaced SKILL.md for {plugin}/{skill}",
+                )
 
 
 class TestNoForbiddenLibraryDeps(unittest.TestCase):
@@ -354,7 +375,7 @@ class TestMarketplaceJson(unittest.TestCase):
             name = entry["name"]
             skills_dir = PLUGINS_DIR / name / "skills"
             if skills_dir.exists():
-                actual_count = len([d for d in skills_dir.iterdir() if d.is_dir()])
+                actual_count = len(direct_skill_names(name))
                 expected_count = len(EXPECTED_SKILLS.get(name, set()))
                 self.assertEqual(actual_count, expected_count,
                                  f"{name}: skill count mismatch "
