@@ -48,9 +48,14 @@ The concrete fallback may include `npx -y` to avoid an interactive package-insta
 - uses Claude Code print mode with `-p`
 - appends skill preload context through `--append-system-prompt` instead of replacing the default system prompt
 - with `--stream`, forces `--output-format stream-json --verbose`
-- writes raw child stdout and stderr to `logs/<agent-id>.{stdout,stderr}.log`
-- with `--stream`, also writes raw child stdout JSONL to `logs/<agent-id>.events.jsonl`
-- with `--stream`, mirrors child stdout and stderr to wrapper stderr for live viewing
+- writes raw child stdout and stderr to `logs/<agent-id>.{stdout,stderr}.log` in non-stream mode
+- writes wrapper-side launch diagnostics to `logs/<agent-id>.wrapper.log` before child output exists
+- with `--stream`, writes sanitized child stdout JSONL to `logs/<agent-id>.events.jsonl`
+- with `--stream`, keeps `logs/<agent-id>.stdout.log` lean instead of duplicating JSON events
+- with `--stream --raw-events`, additionally writes unsanitized child stdout JSONL to `logs/<agent-id>.raw-events.jsonl`
+- with `--stream`, mirrors sanitized child stdout events and raw child stderr to wrapper stderr for live viewing
+- with `--stream`, terminates the child process group if no first stdout/stderr line arrives before `--startup-timeout` seconds
+- with `--stream`, bounds stream-reader shutdown after child exit and cleans up process-group descendants before failing closed
 - removes any stale declared signal before launch
 - requires the child process to exit `0`
 - requires the declared report file to exist
@@ -84,9 +89,11 @@ After completion, or after an explicit `deactivate.py` for diagnostics, inspect:
 <SESSION_DIR>/logs/<agent-id>.events.jsonl
 <SESSION_DIR>/logs/<agent-id>.stdout.log
 <SESSION_DIR>/logs/<agent-id>.stderr.log
+<SESSION_DIR>/logs/<agent-id>.wrapper.log
+<SESSION_DIR>/logs/<agent-id>.raw-events.jsonl  # only with --raw-events
 ```
 
-Use `.events.jsonl` for raw Claude Code stream events, `.stdout.log` for the same raw child stdout, and `.stderr.log` for child stderr.
+Use `.events.jsonl` for lean Claude Code stream events, `.stdout.log` for non-JSON stdout plus stream-mode notes, `.stderr.log` for child stderr, and `.wrapper.log` for sanitized argv, child PID, timeout, and exit diagnostics. Use `--raw-events` only for explicit forensic debugging because it can be large and may contain provider internals.
 
 ## Skill preloading
 

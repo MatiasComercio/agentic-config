@@ -20,7 +20,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -37,9 +39,29 @@ def main() -> int:
         prompt = sys.argv[-1] if sys.argv[1:] else ""
     prompt_path.write_text(prompt)
 
+    sleep_before_output = float(os.environ.get("FAKE_CC_SLEEP_BEFORE_OUTPUT", "0"))
+    if sleep_before_output:
+        time.sleep(sleep_before_output)
+
     stream_mode = "--output-format" in sys.argv and sys.argv[sys.argv.index("--output-format") + 1] == "stream-json"
+    if os.environ.get("FAKE_CC_SPAWN_PIPE_HOLDER", "0") == "1":
+        subprocess.Popen([sys.executable, "-c", "import time; time.sleep(5)"])
+
     if stream_mode:
         print(json.dumps({{"type": "message_start", "message": "hello"}}), flush=True)
+        if os.environ.get("FAKE_CC_SENSITIVE_EVENT", "0") == "1":
+            print(
+                json.dumps(
+                    {{
+                        "type": "message_update",
+                        "message": {{
+                            "content": [{{"type": "text", "text": "secret prompt text"}}],
+                            "thinkingSignature": "encrypted-signature-value",
+                        }},
+                    }}
+                ),
+                flush=True,
+            )
         print(json.dumps({{"type": "tool_use", "name": "Read"}}), flush=True)
         print("fake claude stream stderr", file=sys.stderr, flush=True)
     else:
@@ -211,9 +233,18 @@ def test_cc_bash_success_uses_resolved_claude_and_expands_prompt(tmp_path: Path)
     stdout_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stdout.log"
     stderr_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stderr.log"
     events_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.events.jsonl"
+    wrapper_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.wrapper.log"
     assert stdout_log.read_text() == "fake claude stdout\n"
     assert stderr_log.read_text() == "fake claude stderr\n"
     assert not events_log.exists()
+    wrapper_text = wrapper_log.read_text()
+    assert "prompt_bytes:" in wrapper_text
+    assert "append_system_prompt_bytes:" in wrapper_text
+    assert "skill_count: 2" in wrapper_text
+    assert "command:" in wrapper_text
+    assert "<redacted>" in wrapper_text
+    assert "Additional append-only guidance." not in wrapper_text
+    assert "Write the report and signal files." not in wrapper_text
 
     argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
     assert argv[:5] == ["--model", "opus", "--output-format", "text", "--no-session-persistence"]
@@ -266,14 +297,16 @@ def test_cc_bash_stream_overrides_output_format_and_tees_events(tmp_path: Path) 
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == "0"
-    assert '{"type": "message_start", "message": "hello"}' in result.stderr
-    assert '{"type": "tool_use", "name": "Read"}' in result.stderr
+    assert '"type":"message_start"' in result.stderr
+    assert '"type":"tool_use"' in result.stderr
     assert "fake claude stream stderr" in result.stderr
 
     stdout_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stdout.log"
     stderr_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stderr.log"
     events_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.events.jsonl"
-    assert stdout_log.read_text() == events_log.read_text()
+    raw_events_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.raw-events.jsonl"
+    assert "stream stdout JSON events are captured as lean events" in stdout_log.read_text()
+    assert not raw_events_log.exists()
     events = [json.loads(line) for line in events_log.read_text().splitlines()]
     assert [event["type"] for event in events] == ["message_start", "tool_use"]
     assert stderr_log.read_text() == "fake claude stream stderr\n"
@@ -281,6 +314,85 @@ def test_cc_bash_stream_overrides_output_format_and_tees_events(tmp_path: Path) 
     argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
     assert argv[:4] == ["--model", "opus", "--output-format", "stream-json"]
     assert "--verbose" in argv
+
+
+def test_cc_bash_stream_sanitizes_events_with_raw_opt_in(tmp_path: Path) -> None:
+    """Lean events omit bulky/sensitive payloads while raw events remain explicit opt-in."""
+    workspace = create_workspace(tmp_path)
+    fake_claude = write_fake_executable(tmp_path, "claude")
+
+    result = run_cc_bash(
+        workspace=workspace,
+        tmp_path=tmp_path,
+        path_value=str(fake_claude.parent),
+        extra_args=["--stream", "--raw-events"],
+        env_overrides={"FAKE_CC_SENSITIVE_EVENT": "1"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    logs_dir = workspace / "tmp" / "mux" / "session" / "logs"
+    events_text = (logs_dir / "agent-1.events.jsonl").read_text()
+    raw_events_text = (logs_dir / "agent-1.raw-events.jsonl").read_text()
+    stdout_text = (logs_dir / "agent-1.stdout.log").read_text()
+
+    assert "secret prompt text" not in events_text
+    assert "encrypted-signature-value" not in events_text
+    assert '\"redacted\":\"object\"' in events_text
+    assert "secret prompt text" in raw_events_text
+    assert "encrypted-signature-value" in raw_events_text
+    assert "secret prompt text" not in stdout_text
+    assert "raw stream stdout is captured" in stdout_text
+
+
+def test_cc_bash_stream_cleans_up_inherited_pipe_descendants(tmp_path: Path) -> None:
+    """Exited workers do not hang forever when descendants inherit stdout/stderr pipes."""
+    workspace = create_workspace(tmp_path)
+    fake_claude = write_fake_executable(tmp_path, "claude")
+
+    result = run_cc_bash(
+        workspace=workspace,
+        tmp_path=tmp_path,
+        path_value=str(fake_claude.parent),
+        extra_args=["--stream", "--shutdown-timeout", "0.1"],
+        env_overrides={"FAKE_CC_SPAWN_PIPE_HOLDER": "1"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "0"
+    assert "stream readers did not finish after child exit" in result.stderr
+
+    wrapper_text = (workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.wrapper.log").read_text()
+    assert "process_group_id:" in wrapper_text
+    assert "exit_code: 0" in wrapper_text
+
+
+def test_cc_bash_stream_fails_fast_when_child_never_emits_first_event(tmp_path: Path) -> None:
+    """Streaming workers get a startup watchdog instead of silent empty events logs."""
+    workspace = create_workspace(tmp_path)
+    fake_claude = write_fake_executable(tmp_path, "claude")
+
+    result = run_cc_bash(
+        workspace=workspace,
+        tmp_path=tmp_path,
+        path_value=str(fake_claude.parent),
+        extra_args=["--stream", "--startup-timeout", "0.1", "--shutdown-timeout", "0.1"],
+        env_overrides={"FAKE_CC_SLEEP_BEFORE_OUTPUT": "5"},
+    )
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "Claude Code produced no stdout/stderr within 0.1s in stream mode" in result.stderr
+    assert "process_tree:" in result.stderr
+
+    logs_dir = workspace / "tmp" / "mux" / "session" / "logs"
+    assert (logs_dir / "agent-1.events.jsonl").read_text() == ""
+    assert "no child stdout/stderr after 0.1s" in (logs_dir / "agent-1.stderr.log").read_text()
+    wrapper_text = (logs_dir / "agent-1.wrapper.log").read_text()
+    assert "child_pid:" in wrapper_text
+    assert "command:" in wrapper_text
+    assert "<redacted>" in wrapper_text
+    assert "Additional append-only guidance." not in wrapper_text
+    assert "Write the report and signal files." not in wrapper_text
 
 
 def test_cc_bash_falls_back_to_npx_package_when_claude_is_unavailable(tmp_path: Path) -> None:

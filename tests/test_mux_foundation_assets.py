@@ -325,11 +325,19 @@ def test_generated_pi_mux_foundation_assets_exist() -> None:
     cc_bash_text = (MUX_TOOLS_ROOT / "cc-bash.py").read_text()
     assert "--stream" in pi_bash_text
     assert '"--mode", "json"' in pi_bash_text
+    assert "--startup-timeout" in pi_bash_text
+    assert "--raw-events" in pi_bash_text
     assert 'f"{safe_name}.events.jsonl"' in pi_bash_text
+    assert 'f"{safe_name}.raw-events.jsonl"' in pi_bash_text
+    assert 'f"{safe_name}.wrapper.log"' in pi_bash_text
     assert "--stream" in cc_bash_text
     assert '"stream-json" if args.stream else str(args.output_format)' in cc_bash_text
     assert 'command.append("--verbose")' in cc_bash_text
+    assert "--startup-timeout" in cc_bash_text
+    assert "--raw-events" in cc_bash_text
     assert 'f"{safe_name}.events.jsonl"' in cc_bash_text
+    assert 'f"{safe_name}.raw-events.jsonl"' in cc_bash_text
+    assert 'f"{safe_name}.wrapper.log"' in cc_bash_text
     assert (MUX_TOOLS_ROOT / "signal.py").exists()
     assert (MUX_TOOLS_ROOT / "verify.py").exists()
     assert PI_MUX_SKILL.exists()

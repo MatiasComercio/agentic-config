@@ -15,6 +15,7 @@ All notable changes to agentic-config.
 
 ### Changed
 
+- `pi-ac-workflow`: harden `pi-bash.py` and `cc-bash.py` stream launches with lean event logs, explicit raw-event opt-in, pre-output wrapper diagnostics, first-event startup watchdogs, and process-group cleanup for inherited-pipe stalls.
 - Canonical generator: reconcile generated package drift by promoting current `pi-ac-safety` allow-persistence behavior into canonical assets and syncing generated `pi-compat` dependency versions.
 - `pi-ac-workflow`: harden `pimux` parent bridge delivery for bursty terminal closeouts with batched notifications, retryable terminal notification state, bridge-delivery reconciliation, and inactivity watchdog alerts.
   - persists parent-delivery acknowledgements only after successful sends and requeues pending deliveries when queued-state persistence or sends fail
