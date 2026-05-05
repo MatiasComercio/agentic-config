@@ -17,7 +17,7 @@ ENFORCEMENT LAYERS:
 4. WebSearch/WebFetch - DENY (delegate to researcher)
 5. TaskOutput - DENY (use signals)
 6. Skill - Allowlisted direct call (only mux-ospec), otherwise DENY
-7. Bash - Whitelist (mkdir -p, uv run tools/*)
+7. Bash - Whitelist (mkdir -p, uv run tools/*, pi-bash wrapper; direct pi blocked)
 8. Task - Validate run_in_background=True
 
 Fail-closed: deny operations if hook encounters errors.
@@ -85,6 +85,7 @@ SEARCH_ALLOWLIST_PATTERNS = [
 # Bash command whitelist (regex patterns)
 BASH_WHITELIST_PATTERNS = [
     r"^mkdir\s+-p\s+",  # Create directories
+    r"^uv\s+run\s+\${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash\.py\s+launch\b",  # pi worker wrapper
     r"^uv\s+run\s+.*tools/",  # Any tools/ invocation
     r"^uv\s+run\s+\${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/",  # MUX skill tools (explicit)
 ]
@@ -153,7 +154,7 @@ def is_bash_allowed(command: str) -> tuple[bool, str]:
     for pattern in BASH_WHITELIST_PATTERNS:
         if re.match(pattern, command):
             return True, f"Matches whitelist: {pattern}"
-    return False, "Command not in MUX whitelist. Allowed: mkdir -p, uv run tools/*"
+    return False, "Command not in MUX whitelist. Allowed: mkdir -p, uv run tools/*, pi-bash.py wrapper"
 
 
 def main() -> None:

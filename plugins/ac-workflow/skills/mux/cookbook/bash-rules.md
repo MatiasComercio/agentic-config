@@ -13,6 +13,7 @@ Orchestrator Bash usage is LIMITED to these EXACT tools.
 | `uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/signal.py` | Create signals (emergency) |
 | `uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/check-signals.py` | One-shot signal check (fallback) |
 | `uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/extract-summary.py` | Bounded report access (TOC + Executive Summary) |
+| `uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch ...` | Launch supervised programmatic pi worker with file-protocol validation |
 | `uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/agents.py` | List/register agents |
 | `mkdir -p` | Create directories |
 
@@ -31,6 +32,7 @@ Orchestrator Bash usage is LIMITED to these EXACT tools.
 | `find` | File search |
 | `cat` / `head` / `tail` | File reading |
 | `python *` | Script execution |
+| `pi *` | Direct programmatic pi execution; use `pi-bash.py` instead |
 | `node *` | Script execution |
 | `cargo *` / `go *` | Build commands |
 | `make` / `gradle` / `mvn` | Build commands |
@@ -46,6 +48,9 @@ git status --porcelain | head -30
 
 # FATAL - orchestrator ran grep
 grep -rn "pattern" --include="*.md"
+
+# FATAL - orchestrator launched pi directly instead of using the wrapper
+pi --model "$MODEL" --thinking "$THINKING" -p "$PROMPT"
 ```
 
 ## Correct Delegation
@@ -61,6 +66,27 @@ Task(prompt="Read ${CLAUDE_PLUGIN_ROOT}/skills/mux/agents/sentinel.md. Check git
 Task(prompt="Read ${CLAUDE_PLUGIN_ROOT}/skills/mux/agents/auditor.md. Search for pattern.", model="sonnet", run_in_background=True)
 ```
 
+## Programmatic pi Workers
+
+Direct `pi ... -p ...` Bash commands remain blocked. Use the wrapper when a MUX wave needs a programmatic pi worker:
+
+```bash
+uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch \
+  "$SESSION_DIR" "$AGENT_ID" \
+  --role "$ROLE" \
+  --worker-type "$WORKER_TYPE" \
+  --objective "$OBJECTIVE" \
+  --scope "$SCOPE" \
+  --task "$TASK" \
+  --report-path "$REPORT_PATH" \
+  --signal-path "$SIGNAL_PATH" \
+  --model "$MODEL" \
+  --thinking "$THINKING" \
+  --cwd "$PROJECT_ROOT"
+```
+
+`pi-bash.py` validates the declared report and signal files after the pi process exits. It does not require an active MUX ledger session; declare-before-dispatch matching is coordinator policy. See `pi-bash.md` for optional strict orchestration guidance.
+
 ## Hook Whitelist Patterns
 
 The orchestrator hook (`mux-orchestrator-guard.py`) enforces these regex patterns:
@@ -68,6 +94,7 @@ The orchestrator hook (`mux-orchestrator-guard.py`) enforces these regex pattern
 ```python
 BASH_WHITELIST_PATTERNS = [
     r"^mkdir\s+-p\s+",                          # Create directories
+    r"^uv\s+run\s+\${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash\.py\s+launch\b",  # pi worker wrapper
     r"^uv\s+run\s+.*tools/",                    # Any tools/ invocation
     r"^uv\s+run\s+\${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/",  # MUX skill tools (explicit)
 ]

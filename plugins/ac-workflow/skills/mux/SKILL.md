@@ -88,6 +88,7 @@ Before ANY action: "Am I delegating or executing?"
 | Delegate work | Task(run_in_background=True) | Always background |
 | Create directories | Bash("mkdir -p") | Directories only |
 | Run mux tools | Bash("uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/*.py") | Once per phase |
+| Launch programmatic pi worker | Bash("uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch ...", run_in_background=True) | File-protocol worker only |
 | Extract report summary | Bash("uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/extract-summary.py") | Bounded report access |
 | Ask user | AskUserQuestion() | As needed |
 | Voice update | mcp__voicemode__converse() | At milestones |
@@ -180,6 +181,29 @@ This ensures every subagent:
 - Creates signal files before returning
 
 **After the preamble, apply expert prompt engineering** — include objective, context file paths from previous phases, constraints, and exact output path. The subagent's success depends entirely on the quality of your prompt.
+
+## PROGRAMMATIC PI WORKERS -- SANCTIONED METHOD ONLY
+
+Direct `pi ... -p ...` Bash commands are forbidden in MUX. When a wave intentionally needs a programmatic pi worker, launch the wrapper instead:
+
+```bash
+uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch \
+  "$SESSION_DIR" "$AGENT_ID" \
+  --role "$ROLE" \
+  --worker-type "$WORKER_TYPE" \
+  --objective "$OBJECTIVE" \
+  --scope "$SCOPE" \
+  --task "$TASK" \
+  --report-path "$REPORT_PATH" \
+  --signal-path "$SIGNAL_PATH" \
+  --model "$MODEL" \
+  --thinking "$THINKING" \
+  --cwd "$PROJECT_ROOT"
+```
+
+The wrapper is a foreground supervisor. Use Bash background execution from the harness when running it as a background worker; do not add `&`, shell pipelines, redirection, or polling loops to the command string.
+
+`pi-bash.py` is intentionally reusable outside MUX. It validates file artifacts, logs raw pi output, and returns exactly `0` on success, but it does not require a MUX ledger session. If a strict declare-before-dispatch gate is desired, enforce it in the coordinator and follow `cookbook/pi-bash.md`.
 
 ## ACCESSING REPORTS -- SANCTIONED METHOD ONLY
 
@@ -311,12 +335,14 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/signal.py $SIGNAL --path $OUTPUT -
 uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/check-signals.py $DIR --expected N    # One-shot signal check
 uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/extract-summary.py $FILE              # Extract TOC + Executive Summary
 uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/extract-summary.py $FILE --metadata   # With file metadata
+uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch ...                # Launch supervised pi worker
 ```
 
 For edge cases, refer to cookbook:
 - `cookbook/phases.md` - Phase execution details
 - `cookbook/anti-patterns.md` - Violation examples
 - `cookbook/bash-rules.md` - Bash command whitelist
+- `cookbook/pi-bash.md` - Programmatic pi worker wrapper and optional strict enforcement
 - `cookbook/skill-delegation.md` - Skill routing
 
 **Path resolution:** Skill lives in `${CLAUDE_PLUGIN_ROOT}/skills/mux/`. Use `path` param for Glob (hidden dirs excluded from patterns).
