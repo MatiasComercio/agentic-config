@@ -13,6 +13,7 @@ All notable changes to agentic-config.
 
 ### Changed
 
+- Canonical generator: reconcile generated package drift by promoting current `pi-ac-safety` allow-persistence behavior into canonical assets and syncing generated `pi-compat` dependency versions.
 - `pi-ac-workflow`: harden `pimux` parent bridge delivery for bursty terminal closeouts with batched notifications, retryable terminal notification state, bridge-delivery reconciliation, and inactivity watchdog alerts.
   - persists parent-delivery acknowledgements only after successful sends and requeues pending deliveries when queued-state persistence or sends fail
   - allows `pimux activity` as final settlement verification alongside `status`

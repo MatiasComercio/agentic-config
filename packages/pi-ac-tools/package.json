@@ -48,7 +48,7 @@
     ]
   },
   "dependencies": {
-    "@agentic-config/pi-compat": "0.3.0-alpha"
+    "@agentic-config/pi-compat": "0.3.0"
   },
   "bundledDependencies": [
     "@agentic-config/pi-compat"
