@@ -5,6 +5,8 @@ export const EXTENSION_NAME = "pimux";
 export const PROTOCOL_VERSION = 1;
 export const REGISTRY_VERSION = 1;
 export const DEFAULT_MODEL = "openai-codex/gpt-5.3-codex";
+export const THINKING_EFFORT_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+export type ThinkingEffort = (typeof THINKING_EFFORT_LEVELS)[number];
 export const DEFAULT_CAPTURE_LINES = 80;
 export const DEFAULT_REPORT_BYTES = 2048;
 export const SESSION_WINDOW = "agent";
@@ -49,6 +51,13 @@ export function nowIso(): string {
 export function normalizeOptional(value: string | undefined): string | undefined {
 	const trimmed = value?.trim();
 	return trimmed ? trimmed : undefined;
+}
+
+export function normalizeThinkingEffort(value: string | undefined): ThinkingEffort | undefined {
+	const normalized = normalizeOptional(value);
+	if (!normalized) return undefined;
+	if ((THINKING_EFFORT_LEVELS as readonly string[]).includes(normalized)) return normalized as ThinkingEffort;
+	throw new Error(`Invalid thinking effort: ${normalized}. Expected one of: ${THINKING_EFFORT_LEVELS.join(", ")}`);
 }
 
 export function slugify(value: string): string {

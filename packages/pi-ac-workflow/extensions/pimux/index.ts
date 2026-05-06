@@ -114,7 +114,9 @@ import {
 	nowIso,
 	normalizeNotificationMode,
 	normalizeOptional,
+	normalizeThinkingEffort,
 	summarizePrompt,
+	type ThinkingEffort,
 } from "./paths.ts";
 import {
 	evaluateBridgeSettlement,
@@ -139,6 +141,7 @@ interface SpawnRequest {
 	agentId?: string;
 	cwd?: string;
 	model?: string;
+	thinking?: ThinkingEffort;
 	prompt: string;
 	role?: string;
 	goal?: string;
@@ -174,7 +177,7 @@ interface ParsedArgs {
 function buildUsage(): string {
 	return [
 		"Usage:",
-		"  /pimux spawn [--open] [--cwd PATH] [--model PROVIDER/MODEL] [--agent-id ID] [--role ROLE] [--goal TEXT] [--parent ID] [--root ID] [--context TEXT] <prompt>",
+		"  /pimux spawn [--open] [--cwd PATH] [--model PROVIDER/MODEL] [--thinking LEVEL] [--agent-id ID] [--role ROLE] [--goal TEXT] [--parent ID] [--root ID] [--context TEXT] <prompt>",
 		"  /pimux open [target|last]",
 		"  /pimux list [--all] [--include-exited] [--root ID]",
 		"  /pimux tree [--all] [--include-exited] [--root ID]",
@@ -427,6 +430,7 @@ function buildSpawnRequest(parsed: ParsedArgs, ctx: ExtensionContext): SpawnRequ
 		agentId: getStringFlag(parsed, "agent-id"),
 		cwd: getStringFlag(parsed, "cwd") ?? ctx.cwd,
 		model: getStringFlag(parsed, "model") ?? formatCurrentModel(ctx) ?? DEFAULT_MODEL,
+		thinking: normalizeThinkingEffort(getStringFlag(parsed, "thinking")),
 		prompt,
 		role: getStringFlag(parsed, "role") ?? inferRoleFromPrompt(prompt),
 		goal: getStringFlag(parsed, "goal") ?? summarizePrompt(prompt),
@@ -1726,6 +1730,8 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 		const openIterm = request.openIterm ?? inferOpenItermFromPrompt(prompt);
 		const notificationMode = DEFAULT_NOTIFICATION_MODE;
 		const contextBrief = normalizeOptional(request.contextBrief);
+		const model = normalizeOptional(request.model) ?? formatCurrentModel(ctx) ?? DEFAULT_MODEL;
+		const thinking = normalizeThinkingEffort(request.thinking);
 		const parentAgentId = normalizeOptional(request.parentAgentId) ?? currentEnv.agentId;
 		let rootAgentId = normalizeOptional(request.rootAgentId);
 		let rootOwnerSessionKey = currentEnv.rootOwnerSessionKey ?? currentSessionKey;
@@ -1752,7 +1758,8 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 			agentId,
 			sessionName,
 			cwd,
-			model: normalizeOptional(request.model) ?? formatCurrentModel(ctx) ?? DEFAULT_MODEL,
+			model,
+			thinking,
 			prompt,
 			role,
 			goal,
@@ -1778,6 +1785,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 			promptPath,
 			cwd,
 			model: launch.model,
+			thinking: launch.thinking,
 			agentId,
 			parentAgentId,
 			rootAgentId,
@@ -1800,6 +1808,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 			sessionName,
 			cwd,
 			model: launch.model,
+			thinking: launch.thinking,
 			promptPreview: summarizePrompt(prompt),
 			role,
 			goal,
@@ -2299,6 +2308,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 								agentId: params.agentId,
 								cwd: params.cwd ?? ctx.cwd,
 								model: params.model,
+								thinking: params.thinking,
 								prompt: params.prompt,
 								role: params.role,
 								goal: params.goal,

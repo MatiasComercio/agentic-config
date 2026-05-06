@@ -239,6 +239,20 @@ def test_launcher_reports_startup_failures_and_exits_instead_of_dropping_to_a_sh
 
 
 
+def test_spawn_forwards_explicit_thinking_effort_to_child_pi() -> None:
+    """pimux spawn should expose and forward Pi's standalone --thinking effort flag."""
+    index_text = PIMUX_INDEX.read_text()
+    schema_text = (PIMUX_PACKAGE_DIR / "schema.ts").read_text()
+    tmux_text = PIMUX_TMUX.read_text()
+    assert "THINKING_EFFORT_LEVELS" in schema_text
+    assert "[--thinking LEVEL]" in index_text
+    assert 'thinking: normalizeThinkingEffort(getStringFlag(parsed, "thinking"))' in index_text
+    assert "thinking: params.thinking" in index_text
+    assert "thinking: launch.thinking" in index_text
+    assert '...(params.thinking ? ["--thinking", params.thinking] : [])' in tmux_text
+
+
+
 def test_spawn_resolves_strict_runtime_as_an_explicit_child_extension() -> None:
     """Child launches should carry the authoritative pimux extension plus its strict sibling explicitly."""
     text = PIMUX_INDEX.read_text()

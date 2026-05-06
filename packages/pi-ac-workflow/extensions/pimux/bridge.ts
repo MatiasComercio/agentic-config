@@ -21,6 +21,7 @@ import {
 	summarizePrompt,
 	truncate,
 	type NotificationMode,
+	type ThinkingEffort,
 } from "./paths.ts";
 import type { BridgeEventDirection, BridgeEventType, SettledTerminalState } from "./settlement.ts";
 
@@ -35,6 +36,7 @@ export interface BridgeLaunchFile {
 	sessionName: string;
 	cwd: string;
 	model: string;
+	thinking?: ThinkingEffort;
 	promptPreview: string;
 	role?: string;
 	goal?: string;
@@ -446,6 +448,7 @@ export async function writeLaunchPacket(
 		`- Root Agent ID: ${launch.rootAgentId}`,
 		launch.parentAgentId ? `- Parent Agent ID: ${launch.parentAgentId}` : undefined,
 		`- Notification Mode: ${launch.notificationMode}`,
+		launch.thinking ? `- Thinking Effort: ${launch.thinking}` : undefined,
 		launch.contextBrief ? `- Context Brief: ${launch.contextBrief}` : undefined,
 	].filter((line): line is string => Boolean(line)).join("\n");
 	await writeTextFileAtomic(packetPath, `${content}\n`);
@@ -469,6 +472,7 @@ export async function createBridgeLaunch(params: {
 	sessionName: string;
 	cwd: string;
 	model: string;
+	thinking?: ThinkingEffort;
 	prompt: string;
 	role?: string;
 	goal?: string;
@@ -490,6 +494,7 @@ export async function createBridgeLaunch(params: {
 		sessionName: params.sessionName,
 		cwd: params.cwd,
 		model: params.model,
+		thinking: params.thinking,
 		promptPreview: summarizePrompt(params.prompt),
 		role: params.role,
 		goal: params.goal,

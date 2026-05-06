@@ -54,6 +54,16 @@ Spawned pimux children always use `notify-and-follow-up`.
 /pimux spawn --open "Act as an orchestrator and keep the session watchable."
 ```
 
+## Thinking effort
+
+Use `--thinking` to pass Pi's thinking effort flag to spawned children. Valid levels are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh`.
+
+```text
+/pimux spawn --model openai-codex/gpt-5.3-codex --thinking high "Plan the migration and report the risks."
+```
+
+The `--model provider/model:thinking` shortcut remains supported by Pi, but `--thinking` is preferred when model identity and effort should stay separate.
+
 ## Messaging
 
 Parent -> child:

@@ -18,6 +18,7 @@ import {
 	ENV_STATE_ROOT,
 	SESSION_WINDOW,
 	shellQuote,
+	type ThinkingEffort,
 } from "./paths.ts";
 
 export interface RunCommandOptions {
@@ -222,6 +223,7 @@ export async function writeLauncherScript(params: {
 	promptPath: string;
 	cwd: string;
 	model: string;
+	thinking?: ThinkingEffort;
 	agentId: string;
 	parentAgentId?: string;
 	rootAgentId: string;
@@ -245,6 +247,7 @@ export async function writeLauncherScript(params: {
 		...params.extensionPaths.flatMap((extensionPath) => ["-e", extensionPath]),
 		"--model",
 		params.model,
+		...(params.thinking ? ["--thinking", params.thinking] : []),
 	];
 	const launcherExitHelperPath = fileURLToPath(new URL("./launcher-exit-cli.ts", import.meta.url));
 	const launcherExitCommandParts = [process.execPath, "--experimental-strip-types", launcherExitHelperPath];
@@ -266,7 +269,7 @@ export ${ENV_ROOT_OWNER_SESSION_KEY}=${shellQuote(params.rootOwnerSessionKey)}
 export ${ENV_EXTENSION_PATH}=${shellQuote(params.extensionPath)}
 cd ${shellQuote(params.cwd)}
 clear
-printf 'Starting pimux agent %s\nWorking dir: %s\nModel: %s\nBridge: %s\n\n' ${shellQuote(params.agentId)} ${shellQuote(params.cwd)} ${shellQuote(params.model)} ${shellQuote(params.launchId)}
+printf 'Starting pimux agent %s\nWorking dir: %s\nModel: %s\nThinking: %s\nBridge: %s\n\n' ${shellQuote(params.agentId)} ${shellQuote(params.cwd)} ${shellQuote(params.model)} ${shellQuote(params.thinking ?? "default")} ${shellQuote(params.launchId)}
 PROMPT=$(cat ${shellQuote(params.promptPath)})
 PI_CMD=(${shellArray(commandParts)})
 PI_EXIT_CMD=(${shellArray(launcherExitCommandParts)})

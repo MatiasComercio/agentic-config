@@ -1,5 +1,6 @@
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
+import { THINKING_EFFORT_LEVELS } from "./paths.ts";
 
 export const PIMUX_PARAMS = Type.Object({
 	action: StringEnum(["spawn", "open", "list", "tree", "status", "activity", "ping_agent", "capture", "send_message", "report_parent", "kill", "prune"] as const),
@@ -7,6 +8,7 @@ export const PIMUX_PARAMS = Type.Object({
 	agentId: Type.Optional(Type.String({ description: "Preferred agent ID when spawning" })),
 	cwd: Type.Optional(Type.String({ description: "Working directory for a spawned agent" })),
 	model: Type.Optional(Type.String({ description: "Model for a spawned agent, e.g. openai-codex/gpt-5.3-codex" })),
+	thinking: Type.Optional(StringEnum(THINKING_EFFORT_LEVELS, { description: "Thinking effort for a spawned agent: off, minimal, low, medium, high, or xhigh" })),
 	prompt: Type.Optional(Type.String({ description: "Initial prompt for a spawned agent" })),
 	role: Type.Optional(Type.String({ description: "Short role label for the agent" })),
 	goal: Type.Optional(Type.String({ description: "Short mission summary" })),

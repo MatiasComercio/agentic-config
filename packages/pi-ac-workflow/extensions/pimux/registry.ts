@@ -16,6 +16,7 @@ import {
 	slugify,
 	truncate,
 	type NotificationMode,
+	type ThinkingEffort,
 } from "./paths.ts";
 import { evaluateBridgeSettlement, isSettledTerminalState, isTerminalChildReportEvent, type BridgeSettlementState } from "./settlement.ts";
 import type { ManagedVisualRef } from "./tmux.ts";
@@ -30,6 +31,7 @@ export interface ManagedAgentRecord {
 	sessionName: string;
 	cwd: string;
 	model: string;
+	thinking?: ThinkingEffort;
 	promptPreview: string;
 	role?: string;
 	goal?: string;
@@ -512,6 +514,7 @@ export function formatAgentDetails(status: ResolvedStatus): string[] {
 		`openCount: ${status.record.openCount}`,
 		`cwd: ${status.record.cwd}`,
 		`model: ${status.record.model}`,
+		status.record.thinking ? `thinking: ${status.record.thinking}` : undefined,
 		status.record.lastOpenedAt ? `lastOpenedAt: ${status.record.lastOpenedAt}` : undefined,
 		status.record.lastMessageAt ? `lastMessageAt: ${status.record.lastMessageAt}` : undefined,
 		status.record.lastSeenAt ? `lastSeenAt: ${status.record.lastSeenAt}` : undefined,
