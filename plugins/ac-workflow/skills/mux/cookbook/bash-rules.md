@@ -53,7 +53,7 @@ git status --porcelain | head -30
 grep -rn "pattern" --include="*.md"
 
 # FATAL - orchestrator launched pi directly instead of using the wrapper
-pi --model "$MODEL" --thinking "$THINKING" -p "$PROMPT"
+pi --provider "$PROVIDER" --model "$MODEL" --thinking "$THINKING" -p "$PROMPT"
 
 # FATAL - orchestrator launched Claude Code directly instead of using the wrapper
 claude --model "$MODEL" -p "$PROMPT"
@@ -89,6 +89,7 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch \
   --task "$TASK" \
   --report-path "$REPORT_PATH" \
   --signal-path "$SIGNAL_PATH" \
+  --provider "$PROVIDER" \
   --model "$MODEL" \
   --thinking "$THINKING" \
   --cwd "$PROJECT_ROOT" \

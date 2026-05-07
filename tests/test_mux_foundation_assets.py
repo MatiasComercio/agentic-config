@@ -317,11 +317,16 @@ def test_generated_pi_mux_foundation_assets_exist() -> None:
     assert (MUX_TOOLS_ROOT / "session.py").exists()
     assert (MUX_TOOLS_ROOT / "ledger.py").exists()
     assert (MUX_TOOLS_ROOT / "pi-bash.py").exists()
+    assert (MUX_TOOLS_ROOT / "pi-bash.default.yaml").exists()
     assert (MUX_TOOLS_ROOT / "cc-bash.py").exists()
     assert (PROJECT_ROOT / "plugins" / "ac-workflow" / "mux" / "tools" / "pi-bash.py").exists()
     assert (PROJECT_ROOT / "plugins" / "ac-workflow" / "mux" / "tools" / "cc-bash.py").exists()
-    assert (PROJECT_ROOT / "plugins" / "ac-workflow" / "skills" / "mux" / "tools" / "pi-bash.py").exists()
-    assert (PROJECT_ROOT / "plugins" / "ac-workflow" / "skills" / "mux" / "tools" / "cc-bash.py").exists()
+    skills_mux_tools = PROJECT_ROOT / "plugins" / "ac-workflow" / "skills" / "mux" / "tools"
+    assert (skills_mux_tools / "pi-bash.py").exists()
+    assert (skills_mux_tools / "pi-bash.default.yaml").exists()
+    assert (skills_mux_tools / "cc-bash.py").exists()
+    assert (skills_mux_tools / "pi-bash.py").read_text() == (MUX_TOOLS_ROOT / "pi-bash.py").read_text()
+    assert (skills_mux_tools / "pi-bash.default.yaml").read_text() == (MUX_TOOLS_ROOT / "pi-bash.default.yaml").read_text()
     pi_bash_text = (MUX_TOOLS_ROOT / "pi-bash.py").read_text()
     cc_bash_text = (MUX_TOOLS_ROOT / "cc-bash.py").read_text()
     assert "--stream" in pi_bash_text
@@ -331,6 +336,9 @@ def test_generated_pi_mux_foundation_assets_exist() -> None:
     assert "--mirror-prefix" in pi_bash_text
     assert "--no-mirror" in pi_bash_text
     assert "--raw-events" in pi_bash_text
+    assert "--provider" in pi_bash_text
+    assert "openai-codex" in (MUX_TOOLS_ROOT / "pi-bash.default.yaml").read_text()
+    assert "gpt-5.5" in (MUX_TOOLS_ROOT / "pi-bash.default.yaml").read_text()
     assert "--heartbeat-interval" in pi_bash_text
     assert "--no-extensions" in pi_bash_text
     assert 'f"{prefix}.events.jsonl"' in pi_bash_text

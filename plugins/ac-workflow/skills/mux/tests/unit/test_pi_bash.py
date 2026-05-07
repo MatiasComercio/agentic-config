@@ -76,6 +76,11 @@ def main() -> int:
         print("fake stdout")
         print("fake stderr", file=sys.stderr)
 
+    if os.environ.get("FAKE_PI_AUTH_FAILURE", "0") == "1":
+        print("No API key found for openai-codex.", file=sys.stderr)
+        print("Use /login to log in to a provider via OAuth or API key.", file=sys.stderr)
+        return 1
+
     if os.environ.get("FAKE_PI_EXIT", "0") != "0":
         return int(os.environ["FAKE_PI_EXIT"])
 
@@ -158,6 +163,7 @@ def run_pi_bash(
     tmp_path: Path,
     extra_args: Sequence[str] = (),
     env_overrides: Mapping[str, str] | None = None,
+    model_args: Sequence[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run pi-bash with a deterministic baseline command."""
     env = os.environ.copy()
@@ -169,6 +175,14 @@ def run_pi_bash(
     )
     if env_overrides:
         env.update(env_overrides)
+    resolved_model_args = list(model_args) if model_args is not None else [
+        "--provider",
+        "openai-codex",
+        "--model",
+        "example-model-tier",
+        "--thinking",
+        "xhigh",
+    ]
 
     command = [
         sys.executable,
@@ -190,10 +204,7 @@ def run_pi_bash(
         "tmp/mux/session/build/agent-1.md",
         "--signal-path",
         "tmp/mux/session/.signals/agent-1.done",
-        "--model",
-        "example/model-tier",
-        "--thinking",
-        "xhigh",
+        *resolved_model_args,
         "--skill",
         "builder",
         "--skill",
@@ -234,8 +245,17 @@ def test_pi_bash_success_prints_zero_persists_logs_and_expands_prompt(tmp_path: 
     assert "Write the report and signal files." not in wrapper_text
 
     argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
-    assert argv[:6] == ["--no-extensions", "--tools", "read,bash,edit,write,grep,find,ls", "--model", "example/model-tier", "--thinking"]
-    assert argv[6] == "xhigh"
+    assert argv[:8] == [
+        "--no-extensions",
+        "--tools",
+        "read,bash,edit,write,grep,find,ls",
+        "--provider",
+        "openai-codex",
+        "--model",
+        "example-model-tier",
+        "--thinking",
+    ]
+    assert argv[8] == "xhigh"
     skill_args = [argv[index + 1] for index, value in enumerate(argv) if value == "--skill"]
     assert skill_args == [
         str(workspace / ".claude" / "skills" / "builder" / "SKILL.md"),
@@ -252,6 +272,117 @@ def test_pi_bash_success_prints_zero_persists_logs_and_expands_prompt(tmp_path: 
     assert f"Requested: `{workspace / 'sentinel.md'}`" in prompt
     assert "Content SHA-256:" in prompt
     assert "final textual response must be exactly `0`" in prompt
+
+
+def test_pi_bash_uses_project_model_config_when_cli_model_args_are_omitted(tmp_path: Path) -> None:
+    """Project pi-bash.yaml supplies explicit provider, model, and thinking flags."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+    (workspace / "pi-bash.yaml").write_text(
+        "default:\n"
+        "  provider: openai-codex\n"
+        "  model: gpt-5.5\n"
+        "  thinking: xhigh\n"
+    )
+
+    result = run_pi_bash(workspace=workspace, fake_pi=fake_pi, tmp_path=tmp_path, model_args=())
+
+    assert result.returncode == 0, result.stderr
+    argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
+    assert [argv[index + 1] for index, value in enumerate(argv) if value == "--provider"] == ["openai-codex"]
+    assert [argv[index + 1] for index, value in enumerate(argv) if value == "--model"] == ["gpt-5.5"]
+    assert [argv[index + 1] for index, value in enumerate(argv) if value == "--thinking"] == ["xhigh"]
+    wrapper_text = log_path(workspace, "wrapper.log").read_text()
+    assert "model_config_sources:" in wrapper_text
+    assert "pi-bash.yaml" in wrapper_text
+
+
+def test_pi_bash_normalizes_provider_prefixed_model_arg(tmp_path: Path) -> None:
+    """A provider-prefixed --model still becomes explicit provider and model flags."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+
+    result = run_pi_bash(
+        workspace=workspace,
+        fake_pi=fake_pi,
+        tmp_path=tmp_path,
+        model_args=["--model", "openai-codex/gpt-5.5", "--thinking", "xhigh"],
+    )
+
+    assert result.returncode == 0, result.stderr
+    argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
+    assert [argv[index + 1] for index, value in enumerate(argv) if value == "--provider"] == ["openai-codex"]
+    assert [argv[index + 1] for index, value in enumerate(argv) if value == "--model"] == ["gpt-5.5"]
+
+
+def test_pi_bash_configure_writes_project_model_config(tmp_path: Path) -> None:
+    """The configure command persists non-secret pi-bash defaults."""
+    workspace = create_workspace(tmp_path)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(PI_BASH),
+            "configure",
+            "--scope",
+            "project",
+            "--cwd",
+            str(workspace),
+            "--provider",
+            "openai-codex",
+            "--model",
+            "gpt-5.5",
+            "--thinking",
+            "xhigh",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"wrote {workspace / 'pi-bash.yaml'}\n"
+    config_text = (workspace / "pi-bash.yaml").read_text()
+    assert "provider: openai-codex" in config_text
+    assert "model: gpt-5.5" in config_text
+    assert "thinking: xhigh" in config_text
+    assert "auth:" in config_text
+
+
+def test_pi_bash_auth_help_prints_oauth_setup(tmp_path: Path) -> None:
+    """Auth help gives a separate-terminal setup flow without secrets."""
+    workspace = create_workspace(tmp_path)
+
+    result = subprocess.run(
+        [sys.executable, str(PI_BASH), "auth-help", "--cwd", str(workspace)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Open a separate terminal" in result.stdout
+    assert "pi --provider openai-codex --model gpt-5.5 --thinking xhigh" in result.stdout
+    assert "/login" in result.stdout
+    assert "ChatGPT Plus/Pro (Codex)" in result.stdout
+
+
+def test_pi_bash_auth_failure_includes_setup_hint(tmp_path: Path) -> None:
+    """Provider auth failures explain how to configure pi before retrying."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+
+    result = run_pi_bash(
+        workspace=workspace,
+        fake_pi=fake_pi,
+        tmp_path=tmp_path,
+        env_overrides={"FAKE_PI_WRITE_ARTIFACTS": "0", "FAKE_PI_AUTH_FAILURE": "1"},
+    )
+
+    assert result.returncode != 0
+    assert "pi-bash authentication/setup required" in result.stderr
+    assert "pi --provider openai-codex --model example-model-tier --thinking xhigh" in result.stderr
+    assert "ChatGPT Plus/Pro (Codex)" in result.stderr
 
 
 def test_pi_bash_stream_tees_events_to_logs_and_wrapper_stderr(tmp_path: Path) -> None:
@@ -279,6 +410,7 @@ def test_pi_bash_stream_tees_events_to_logs_and_wrapper_stderr(tmp_path: Path) -
 
     argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
     assert argv[:5] == ["--mode", "json", "--no-extensions", "--tools", "read,bash,edit,write,grep,find,ls"]
+    assert [argv[index + 1] for index, value in enumerate(argv) if value == "--provider"] == ["openai-codex"]
 
 
 def test_pi_bash_stream_prefixes_child_hook_stderr(tmp_path: Path) -> None:

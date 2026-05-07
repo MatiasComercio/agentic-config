@@ -16,6 +16,7 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch \
   --task "$TASK" \
   --report-path "$REPORT_PATH" \
   --signal-path "$SIGNAL_PATH" \
+  --provider "$PROVIDER" \
   --model "$MODEL" \
   --thinking "$THINKING" \
   --skill "$SKILL_PATH" \
@@ -25,6 +26,27 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch \
 
 Operational default: include `--stream` for MUX launches so the coordinator can watch worker turn/tool events in the background command output. Omit it only for low-noise automation. Startup silence is warning-only because `pi --mode json` can be legitimately silent before its first model/tool event; use `--startup-warn-after N` to tune or disable that diagnostic.
 
+Always make provider, model, and thinking explicit either in the launch command or in `pi-bash.yaml`. Config precedence mirrors the safety config pattern: project `./pi-bash.yaml` > user `~/.claude/pi-bash.yaml` > wrapper `pi-bash.default.yaml`. The bundled default is `openai-codex` / `gpt-5.5` / `xhigh`.
+
+Write or update project defaults with:
+
+```bash
+uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py configure \
+  --scope project \
+  --provider openai-codex \
+  --model gpt-5.5 \
+  --thinking xhigh \
+  --cwd "$PROJECT_ROOT"
+```
+
+If the selected provider is not authenticated, run this in a separate terminal:
+
+```bash
+uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py auth-help --cwd "$PROJECT_ROOT"
+```
+
+Then run the shown `pi --provider ... --model ... --thinking ...` command, type `/login`, and select the matching provider. For the bundled default, select ChatGPT Plus/Pro (Codex).
+
 The wrapper is a foreground supervisor. If the worker should run in the background, use the Bash tool's background mode. Do not add `&`, shell pipelines, redirection, or polling loops to the command string.
 
 ## What the wrapper enforces
@@ -33,6 +55,7 @@ The wrapper is a foreground supervisor. If the worker should run in the backgrou
 
 - runs `pi` with `subprocess.Popen(..., shell=False, start_new_session=True)` in stream and non-stream mode
 - passes requested skills to pi with repeatable `--skill` arguments
+- always passes explicit `--provider`, `--model`, and `--thinking` to pi, resolved from CLI flags or `pi-bash.yaml`
 - with `--stream`, runs pi with `--mode json`
 - writes attempt-scoped logs to `logs/<agent-id>.<attempt-id>.*`
 - writes `logs/<agent-id>.latest.json` so retries never overwrite prior evidence

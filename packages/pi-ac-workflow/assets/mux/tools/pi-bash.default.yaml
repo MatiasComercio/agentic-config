@@ -1,0 +1,18 @@
+# pi-bash defaults. Override at: project pi-bash.yaml > ~/.claude/pi-bash.yaml > this file.
+default:
+  provider: openai-codex
+  model: gpt-5.5
+  thinking: xhigh
+available_models:
+  - provider: openai-codex
+    model: gpt-5.5
+    thinking: xhigh
+    auth: ChatGPT Plus/Pro Codex OAuth via /login
+  - provider: openai-codex
+    model: gpt-5.4
+    thinking: xhigh
+    auth: ChatGPT Plus/Pro Codex OAuth via /login
+  - provider: github-copilot
+    model: gpt-5.3-codex
+    thinking: xhigh
+    auth: GitHub Copilot OAuth via /login

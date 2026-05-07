@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.11"
-# dependencies = []
+# dependencies = ["pyyaml"]
 # ///
 """Run a programmatic pi worker behind a file-based MUX-compatible contract."""
 
@@ -20,7 +20,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Event, Lock, Thread
-from typing import Sequence, TextIO
+from typing import Any, Sequence, TextIO
+
+import yaml  # type: ignore[import-untyped]
 
 DEFAULT_STARTUP_WARN_AFTER_SECONDS = 30.0
 DEFAULT_SHUTDOWN_TIMEOUT_SECONDS = 5.0
@@ -29,6 +31,11 @@ DEFAULT_HANG_SNAPSHOT_AFTER_SECONDS = 120.0
 DEFAULT_RUNTIME_TIMEOUT_SECONDS = 0.0
 DEFAULT_IDLE_TIMEOUT_SECONDS = 0.0
 DEFAULT_TOOL_ALLOWLIST = "read,bash,edit,write,grep,find,ls"
+DEFAULT_MODEL_PROVIDER = "openai-codex"
+DEFAULT_MODEL = "gpt-5.5"
+DEFAULT_THINKING = "xhigh"
+MODEL_CONFIG_FILE_NAME = "pi-bash.yaml"
+DEFAULT_MODEL_CONFIG_FILE_NAME = "pi-bash.default.yaml"
 MAX_SESSION_TAIL_BYTES = 262_144
 MAX_SESSION_TAIL_LINES = 80
 # Do not import stdlib signal here: this directory also contains signal.py.
@@ -139,6 +146,16 @@ class LaunchPaths:
 
 
 @dataclass(frozen=True)
+class PiBashModelDefaults:
+    """Resolved pi-bash provider/model/thinking defaults."""
+
+    provider: str
+    model: str
+    thinking: str
+    source_paths: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class LaunchConfig:
     """Validated launch configuration."""
 
@@ -151,8 +168,10 @@ class LaunchConfig:
     task: str
     report_path: str
     signal_path: str
+    provider: str
     model: str
-    thinking: str | None
+    thinking: str
+    model_config_sources: tuple[str, ...]
     skills: tuple[str, ...]
     extensions: tuple[str, ...]
     allow_extensions: bool
@@ -179,6 +198,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "launch":
             return launch_from_args(args)
+        if args.command == "configure":
+            return configure_from_args(args)
+        if args.command == "auth-help":
+            return auth_help_from_args(args)
         raise PiBashError(f"unsupported command: {args.command}")
     except PiBashError as error:
         print(f"ERROR: {error}", file=sys.stderr)
@@ -200,8 +223,9 @@ def build_parser() -> argparse.ArgumentParser:
     launch_parser.add_argument("--task", required=True, help="Bounded worker task instructions")
     launch_parser.add_argument("--report-path", required=True, help="Required worker report path")
     launch_parser.add_argument("--signal-path", required=True, help="Required success signal path")
-    launch_parser.add_argument("--model", required=True, help="pi model argument to pass through")
-    launch_parser.add_argument("--thinking", default=None, help="Optional pi thinking level to pass through")
+    launch_parser.add_argument("--provider", default=None, help="pi provider; defaults from pi-bash.yaml")
+    launch_parser.add_argument("--model", default=None, help="pi model; defaults from pi-bash.yaml")
+    launch_parser.add_argument("--thinking", default=None, help="pi thinking level; defaults from pi-bash.yaml")
     launch_parser.add_argument(
         "--skill",
         action="append",
@@ -279,6 +303,24 @@ def build_parser() -> argparse.ArgumentParser:
     launch_parser.add_argument("--attempt-id", default=None, help="Optional deterministic attempt id for log names")
     launch_parser.add_argument("--cwd", default=".", help="Project root / worker current directory")
     launch_parser.add_argument("--pi-bin", default="pi", help="pi executable path, primarily for tests")
+
+    configure_parser = subparsers.add_parser("configure", help="write pi-bash.yaml defaults")
+    configure_parser.add_argument(
+        "--scope",
+        choices=["project", "user"],
+        default="project",
+        help="Write project pi-bash.yaml or user ~/.claude/pi-bash.yaml",
+    )
+    configure_parser.add_argument("--cwd", default=".", help="Project root for project-scoped config")
+    configure_parser.add_argument("--provider", default=DEFAULT_MODEL_PROVIDER, help="Default pi provider to persist")
+    configure_parser.add_argument("--model", default=DEFAULT_MODEL, help="Default pi model to persist")
+    configure_parser.add_argument("--thinking", default=DEFAULT_THINKING, help="Default pi thinking level to persist")
+
+    auth_parser = subparsers.add_parser("auth-help", help="print pi OAuth/API-key setup instructions")
+    auth_parser.add_argument("--cwd", default=".", help="Project root for resolving pi-bash.yaml")
+    auth_parser.add_argument("--provider", default=None, help="Provider to show; defaults from pi-bash.yaml")
+    auth_parser.add_argument("--model", default=None, help="Model to show; defaults from pi-bash.yaml")
+    auth_parser.add_argument("--thinking", default=None, help="Thinking level to show; defaults from pi-bash.yaml")
     return parser
 
 
@@ -291,6 +333,38 @@ def parse_non_negative_float(value: str) -> float:
     if amount < 0:
         raise argparse.ArgumentTypeError(f"expected a non-negative number, got {value!r}")
     return amount
+
+
+def configure_from_args(args: argparse.Namespace) -> int:
+    """Persist pi-bash provider/model/thinking defaults."""
+    cwd = resolve_cwd(args.cwd)
+    target_path = model_config_path(cwd, str(args.scope))
+    provider = require_non_empty(str(args.provider), "provider")
+    model = require_non_empty(str(args.model), "model")
+    thinking = require_non_empty(str(args.thinking), "thinking")
+    payload = {
+        "default": {"provider": provider, "model": model, "thinking": thinking},
+        "available_models": [
+            {
+                "provider": provider,
+                "model": model,
+                "thinking": thinking,
+                "auth": auth_provider_label(provider),
+            }
+        ],
+    }
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=False), encoding="utf-8")
+    sys.stdout.write(f"wrote {target_path}\n")
+    return 0
+
+
+def auth_help_from_args(args: argparse.Namespace) -> int:
+    """Print setup instructions for pi OAuth/API-key credentials."""
+    cwd = resolve_cwd(args.cwd)
+    model_defaults = resolve_model_defaults(cwd, args)
+    sys.stdout.write(build_auth_setup_hint(cwd, model_defaults.provider, model_defaults.model, model_defaults.thinking))
+    return 0
 
 
 def launch_from_args(args: argparse.Namespace) -> int:
@@ -323,6 +397,8 @@ def launch_from_args(args: argparse.Namespace) -> int:
             details.append(f"pi exited with code {result}")
         if lifecycle_error is not None:
             details.append(f"wrapper lifecycle error: {lifecycle_error}")
+        if pi_auth_failure_detected(paths.stderr_log):
+            details.append(build_auth_setup_hint(config.cwd, config.provider, config.model, config.thinking).rstrip())
         suffix = f"; {'; '.join(details)}" if details else ""
         raise PiBashError(f"{protocol_error}{suffix}; see {paths.stdout_log} and {paths.stderr_log}") from protocol_error
 
@@ -337,14 +413,146 @@ def launch_from_args(args: argparse.Namespace) -> int:
     return 0
 
 
-def parse_launch_config(args: argparse.Namespace) -> LaunchConfig:
-    """Convert parsed argparse values into a validated launch config."""
-    cwd = Path(os.path.expandvars(str(args.cwd))).expanduser()
+def resolve_cwd(value: str) -> Path:
+    """Resolve and validate a project root path."""
+    cwd = Path(os.path.expandvars(str(value))).expanduser()
     if not cwd.is_absolute():
         cwd = Path.cwd() / cwd
     cwd = cwd.resolve(strict=False)
     if not cwd.exists() or not cwd.is_dir():
         raise PiBashError(f"cwd does not exist or is not a directory: {cwd}")
+    return cwd
+
+
+def require_non_empty(value: str | None, name: str) -> str:
+    """Require a non-empty string value."""
+    if value is None or not value.strip():
+        raise PiBashError(f"{name} is required")
+    return value.strip()
+
+
+def resolve_model_defaults(cwd: Path, args: argparse.Namespace) -> PiBashModelDefaults:
+    """Resolve provider/model/thinking from CLI overrides and YAML defaults."""
+    config_values, source_paths = load_model_config(cwd)
+    default_values = config_values.get("default", {})
+    if not isinstance(default_values, dict):
+        raise PiBashError("pi-bash model config field 'default' must be a mapping")
+
+    provider = require_non_empty(str(args.provider or default_values.get("provider") or DEFAULT_MODEL_PROVIDER), "provider")
+    model = require_non_empty(str(args.model or default_values.get("model") or DEFAULT_MODEL), "model")
+    thinking = require_non_empty(str(args.thinking or default_values.get("thinking") or DEFAULT_THINKING), "thinking")
+    if "/" in model:
+        provider_prefix, model_suffix = model.split("/", 1)
+        if args.provider and provider != provider_prefix:
+            raise PiBashError(f"--provider {provider!r} conflicts with --model provider prefix {provider_prefix!r}")
+        provider = require_non_empty(provider_prefix, "provider")
+        model = require_non_empty(model_suffix, "model")
+    return PiBashModelDefaults(provider=provider, model=model, thinking=thinking, source_paths=source_paths)
+
+
+def load_model_config(cwd: Path) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """Load pi-bash YAML config with default < user < project precedence."""
+    config: dict[str, Any] = {
+        "default": {"provider": DEFAULT_MODEL_PROVIDER, "model": DEFAULT_MODEL, "thinking": DEFAULT_THINKING}
+    }
+    source_paths: list[str] = []
+    for path in model_config_candidates(cwd):
+        if not path.exists():
+            continue
+        if not path.is_file():
+            raise PiBashError(f"pi-bash config path exists and is not a file: {path}")
+        loaded = read_yaml_mapping(path)
+        config = merge_mapping(config, loaded)
+        source_paths.append(str(path))
+    if not source_paths:
+        source_paths.append("built-in defaults")
+    return config, tuple(source_paths)
+
+
+def model_config_candidates(cwd: Path) -> tuple[Path, Path, Path]:
+    """Return default, user, and project pi-bash config paths."""
+    return (
+        Path(__file__).resolve().with_name(DEFAULT_MODEL_CONFIG_FILE_NAME),
+        Path.home() / ".claude" / MODEL_CONFIG_FILE_NAME,
+        cwd / MODEL_CONFIG_FILE_NAME,
+    )
+
+
+def model_config_path(cwd: Path, scope: str) -> Path:
+    """Return a writable model config path for a scope."""
+    if scope == "project":
+        return cwd / MODEL_CONFIG_FILE_NAME
+    if scope == "user":
+        return Path.home() / ".claude" / MODEL_CONFIG_FILE_NAME
+    raise PiBashError(f"unsupported config scope: {scope}")
+
+
+def read_yaml_mapping(path: Path) -> dict[str, Any]:
+    """Read a YAML mapping from disk."""
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as error:
+        raise PiBashError(f"failed to parse pi-bash config {path}: {error}") from error
+    if loaded is None:
+        return {}
+    if not isinstance(loaded, dict):
+        raise PiBashError(f"pi-bash config must be a mapping: {path}")
+    return dict(loaded)
+
+
+def merge_mapping(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Merge YAML mappings recursively."""
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = merge_mapping(dict(merged[key]), value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def auth_provider_label(provider: str) -> str:
+    """Return a human-readable authentication hint for a provider."""
+    labels = {
+        "openai-codex": "ChatGPT Plus/Pro Codex OAuth via /login",
+        "github-copilot": "GitHub Copilot OAuth via /login",
+        "anthropic": "Claude Pro/Max OAuth or Anthropic API key via /login",
+        "openai": "OpenAI API key via /login or OPENAI_API_KEY",
+    }
+    return labels.get(provider, "OAuth or API key via /login")
+
+
+def build_auth_setup_hint(cwd: Path, provider: str, model: str, thinking: str) -> str:
+    """Return pi setup instructions for a separate terminal."""
+    command = shlex.join(["pi", "--provider", provider, "--model", model, "--thinking", thinking])
+    test_command = shlex.join(
+        ["pi", "--provider", provider, "--model", model, "--thinking", thinking, "-p", "Respond exactly: ok"]
+    )
+    return (
+        "pi-bash authentication/setup required.\n"
+        "Open a separate terminal and run:\n"
+        f"  cd {shlex.quote(str(cwd))}\n"
+        f"  {command}\n"
+        "Then type /login, select the provider for this model, and complete OAuth/API-key setup.\n"
+        "For the default Codex setup, select ChatGPT Plus/Pro (Codex).\n"
+        "After login, verify with:\n"
+        f"  {test_command}\n"
+    )
+
+
+def pi_auth_failure_detected(stderr_log: Path) -> bool:
+    """Return whether the child stderr log looks like a pi auth/setup failure."""
+    try:
+        text = stderr_log.read_text(errors="replace")[-4096:]
+    except OSError:
+        return False
+    auth_markers = ("No API key found", "Use /login", "couldn't authenticate", "could not authenticate")
+    return any(marker in text for marker in auth_markers)
+
+
+def parse_launch_config(args: argparse.Namespace) -> LaunchConfig:
+    """Convert parsed argparse values into a validated launch config."""
+    cwd = resolve_cwd(args.cwd)
 
     required_values = {
         "session_dir": args.session_dir,
@@ -355,11 +563,12 @@ def parse_launch_config(args: argparse.Namespace) -> LaunchConfig:
         "task": args.task,
         "report_path": args.report_path,
         "signal_path": args.signal_path,
-        "model": args.model,
     }
     for name, value in required_values.items():
         if not str(value).strip():
             raise PiBashError(f"{name} is required")
+
+    model_defaults = resolve_model_defaults(cwd, args)
 
     return LaunchConfig(
         session_dir=str(args.session_dir),
@@ -371,8 +580,10 @@ def parse_launch_config(args: argparse.Namespace) -> LaunchConfig:
         task=str(args.task),
         report_path=str(args.report_path),
         signal_path=str(args.signal_path),
-        model=str(args.model),
-        thinking=str(args.thinking) if args.thinking else None,
+        provider=model_defaults.provider,
+        model=model_defaults.model,
+        thinking=model_defaults.thinking,
+        model_config_sources=model_defaults.source_paths,
         skills=tuple(str(skill) for skill in args.skill),
         extensions=tuple(str(extension) for extension in args.extension),
         allow_extensions=bool(args.allow_extensions),
@@ -433,9 +644,7 @@ def build_pi_command(config: LaunchConfig, skills: Sequence[ResolvedSkill], prom
         command.extend(["--extension", extension])
     if config.tools:
         command.extend(["--tools", config.tools])
-    command.extend(["--model", config.model])
-    if config.thinking:
-        command.extend(["--thinking", config.thinking])
+    command.extend(["--provider", config.provider, "--model", config.model, "--thinking", config.thinking])
     for skill in skills:
         command.extend(["--skill", str(skill.cli_path)])
     command.extend(["-p", prompt])
@@ -989,8 +1198,10 @@ def write_launch_metadata(
         f"allow_extensions: {config.allow_extensions}",
         f"extension_count: {len(config.extensions)}",
         f"tools: {config.tools or ''}",
+        f"provider: {config.provider}",
         f"model: {config.model}",
-        f"thinking: {config.thinking or ''}",
+        f"thinking: {config.thinking}",
+        f"model_config_sources: {', '.join(config.model_config_sources)}",
         f"startup_warn_after_seconds: {config.startup_warn_after:g}",
         f"shutdown_timeout_seconds: {config.shutdown_timeout:g}",
         f"mirror_prefix: {config.mirror_prefix or ''}",
@@ -1029,8 +1240,10 @@ def write_latest_manifest(
         "status": status,
         "cwd": str(config.cwd),
         "stream": config.stream,
+        "provider": config.provider,
         "model": config.model,
         "thinking": config.thinking,
+        "model_config_sources": list(config.model_config_sources),
         "command": render_command_preview(command),
         "stdout_log": str(paths.stdout_log),
         "stderr_log": str(paths.stderr_log),

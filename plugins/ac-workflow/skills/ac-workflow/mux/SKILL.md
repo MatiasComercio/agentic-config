@@ -199,6 +199,7 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch \
   --task "$TASK" \
   --report-path "$REPORT_PATH" \
   --signal-path "$SIGNAL_PATH" \
+  --provider "$PROVIDER" \
   --model "$MODEL" \
   --thinking "$THINKING" \
   --cwd "$PROJECT_ROOT" \
@@ -224,6 +225,25 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash.py launch \
 ```
 
 Operational default: include `--stream` for wrapper launches so live child JSONL events appear in the background Bash task output. Omit it only for low-noise automation. Startup silence is warning-only by default because workers can be legitimately silent before the first model/tool event; use `--startup-warn-after N` to tune or disable that diagnostic.
+
+For `pi-bash.py`, always make the provider, model, and thinking level explicit either in the launch command or in `pi-bash.yaml`. Config precedence mirrors the safety config pattern: project `./pi-bash.yaml` > user `~/.claude/pi-bash.yaml` > wrapper `pi-bash.default.yaml`. The bundled default is provider `openai-codex`, model `gpt-5.5`, thinking `xhigh`. To write a config, run:
+
+```bash
+uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py configure \
+  --scope project \
+  --provider openai-codex \
+  --model gpt-5.5 \
+  --thinking xhigh \
+  --cwd "$PROJECT_ROOT"
+```
+
+If pi authentication is not configured, use a separate terminal:
+
+```bash
+uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py auth-help --cwd "$PROJECT_ROOT"
+```
+
+Then run the shown `pi --provider ... --model ... --thinking ...` command, type `/login`, and select the matching OAuth/API-key provider. For the bundled Codex default, select ChatGPT Plus/Pro (Codex).
 
 The wrappers are foreground supervisors. Use Bash background execution from the harness when running them as background workers; do not add `&`, shell pipelines, redirection, or polling loops to the command string.
 
