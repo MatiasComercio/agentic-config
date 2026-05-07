@@ -413,6 +413,18 @@ def test_pi_bash_stream_tees_events_to_logs_and_wrapper_stderr(tmp_path: Path) -
     assert [argv[index + 1] for index, value in enumerate(argv) if value == "--provider"] == ["openai-codex"]
 
 
+def test_pi_bash_stream_defaults_to_bounded_idle_timeout(tmp_path: Path) -> None:
+    """Streaming workers fail closed by default when child output stalls too long."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+
+    result = run_pi_bash(workspace=workspace, fake_pi=fake_pi, tmp_path=tmp_path, extra_args=["--stream"])
+
+    assert result.returncode == 0, result.stderr
+    wrapper_text = log_path(workspace, "wrapper.log").read_text()
+    assert "idle_timeout_seconds: 600" in wrapper_text
+
+
 def test_pi_bash_stream_prefixes_child_hook_stderr(tmp_path: Path) -> None:
     """Mirrored child hook output is attributable to the inner pi worker."""
     workspace = create_workspace(tmp_path)
@@ -557,6 +569,30 @@ def test_pi_bash_stream_cleans_up_inherited_pipe_descendants(tmp_path: Path) -> 
     wrapper_text = log_path(workspace, "wrapper.log").read_text()
     assert "process_group_id:" in wrapper_text
     assert "exit_code: 0" in wrapper_text
+
+
+def test_pi_bash_stream_idle_timeout_terminates_silent_child_and_updates_manifest(tmp_path: Path) -> None:
+    """Streaming workers terminate stalled children and persist terminal manifest state."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+
+    result = run_pi_bash(
+        workspace=workspace,
+        fake_pi=fake_pi,
+        tmp_path=tmp_path,
+        extra_args=["--stream", "--startup-warn-after", "0", "--idle-timeout", "0.1", "--shutdown-timeout", "0.1"],
+        env_overrides={"FAKE_PI_SLEEP_BEFORE_OUTPUT": "5"},
+    )
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "idle timeout reached; terminating child process group" in result.stderr
+    assert "wrapper lifecycle error: pi produced no child output for 0.1s" in result.stderr
+
+    latest = json.loads((workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.latest.json").read_text())
+    assert latest["status"] == "failed"
+    assert latest["child_pid"]
+    assert "no child output" in latest["error"]
 
 
 def test_pi_bash_stream_warns_without_killing_when_child_delays_first_event(tmp_path: Path) -> None:

@@ -333,6 +333,8 @@ def test_generated_pi_mux_foundation_assets_exist() -> None:
     assert '"--mode", "json"' in pi_bash_text
     assert "--startup-warn-after" in pi_bash_text
     assert "DEFAULT_STARTUP_WARN_AFTER_SECONDS = 30.0" in pi_bash_text
+    assert "DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 600.0" in pi_bash_text
+    assert "stdin=subprocess.DEVNULL" in pi_bash_text
     assert "--mirror-prefix" in pi_bash_text
     assert "--no-mirror" in pi_bash_text
     assert "--raw-events" in pi_bash_text

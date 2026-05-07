@@ -24,7 +24,7 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch \
   --stream
 ```
 
-Operational default: include `--stream` for MUX launches so the coordinator can watch worker turn/tool events in the background command output. Omit it only for low-noise automation. Startup silence is warning-only because `pi --mode json` can be legitimately silent before its first model/tool event; use `--startup-warn-after N` to tune or disable that diagnostic.
+Operational default: include `--stream` for MUX launches so the coordinator can watch worker turn/tool events in the background command output. Omit it only for low-noise automation. Startup silence is warning-only because `pi --mode json` can be legitimately silent before its first model/tool event; use `--startup-warn-after N` to tune or disable that diagnostic. Extended output silence is fail-closed: stream launches default to `--idle-timeout 600`, `--idle-timeout N` tunes the threshold, and `--idle-timeout 0` disables it only for explicitly justified cases.
 
 Always make provider, model, and thinking explicit either in the launch command or in `pi-bash.yaml`. Config precedence mirrors the safety config pattern: project `./pi-bash.yaml` > user `~/.claude/pi-bash.yaml` > wrapper `pi-bash.default.yaml`. The bundled default is `openai-codex` / `gpt-5.5` / `xhigh`.
 
@@ -53,7 +53,7 @@ The wrapper is a foreground supervisor. If the worker should run in the backgrou
 
 `pi-bash.py` owns subprocess and artifact safety:
 
-- runs `pi` with `subprocess.Popen(..., shell=False, start_new_session=True)` in stream and non-stream mode
+- runs `pi` with `subprocess.Popen(..., shell=False, stdin=DEVNULL, start_new_session=True)` in stream and non-stream mode
 - passes requested skills to pi with repeatable `--skill` arguments
 - always passes explicit `--provider`, `--model`, and `--thinking` to pi, resolved from CLI flags or `pi-bash.yaml`
 - with `--stream`, runs pi with `--mode json`
@@ -67,6 +67,7 @@ The wrapper is a foreground supervisor. If the worker should run in the backgrou
 - with `--no-mirror`, suppresses live child output while keeping logs and events
 - with `--startup-warn-after`, warns if no first stdout/stderr line arrives before the threshold without killing the child
 - supervises stream and non-stream children with heartbeat diagnostics, optional runtime/idle timeouts, and sanitized process/session snapshots
+- fails terminally on default stream idle timeout and records failed lifecycle state in `logs/<agent-id>.latest.json`
 - defaults to `--no-extensions` with a built-in tool allowlist unless explicitly overridden
 - bounds stream-reader shutdown after child exit and logs cleanup warnings before protocol validation
 - removes stale declared report and signal files before launch

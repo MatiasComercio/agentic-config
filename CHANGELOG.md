@@ -23,6 +23,10 @@ All notable changes to agentic-config.
   - allows `pimux activity` as final settlement verification alongside `status`
   - allows `pimux open` during supervision only when the user explicitly asks to watch live, while routine polling checks remain blocked
 
+### Fixed
+
+- `pi-ac-workflow`: make `pi-bash.py` stream workers fail closed on prolonged child-output silence, run child stdin from `DEVNULL`, and persist failed lifecycle state in the latest-attempt manifest.
+
 ## [0.3.0] - 2026-04-30
 
 ### Added

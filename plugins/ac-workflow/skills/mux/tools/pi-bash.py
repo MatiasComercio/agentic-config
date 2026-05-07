@@ -30,6 +30,7 @@ DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 60.0
 DEFAULT_HANG_SNAPSHOT_AFTER_SECONDS = 120.0
 DEFAULT_RUNTIME_TIMEOUT_SECONDS = 0.0
 DEFAULT_IDLE_TIMEOUT_SECONDS = 0.0
+DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 600.0
 DEFAULT_TOOL_ALLOWLIST = "read,bash,edit,write,grep,find,ls"
 DEFAULT_MODEL_PROVIDER = "openai-codex"
 DEFAULT_MODEL = "gpt-5.5"
@@ -297,8 +298,11 @@ def build_parser() -> argparse.ArgumentParser:
     launch_parser.add_argument(
         "--idle-timeout",
         type=parse_non_negative_float,
-        default=DEFAULT_IDLE_TIMEOUT_SECONDS,
-        help="Maximum seconds without child stdout/stderr before terminating; use 0 to disable",
+        default=None,
+        help=(
+            "Maximum seconds without child stdout/stderr before terminating; use 0 to disable. "
+            "Defaults to 600 in stream mode and disabled in non-stream mode."
+        ),
     )
     launch_parser.add_argument("--attempt-id", default=None, help="Optional deterministic attempt id for log names")
     launch_parser.add_argument("--cwd", default=".", help="Project root / worker current directory")
@@ -429,6 +433,15 @@ def require_non_empty(value: str | None, name: str) -> str:
     if value is None or not value.strip():
         raise PiBashError(f"{name} is required")
     return value.strip()
+
+
+def resolve_idle_timeout(value: float | None, stream: bool) -> float:
+    """Return the effective child-output idle timeout for this launch."""
+    if value is not None:
+        return float(value)
+    if stream:
+        return DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS
+    return DEFAULT_IDLE_TIMEOUT_SECONDS
 
 
 def resolve_model_defaults(cwd: Path, args: argparse.Namespace) -> PiBashModelDefaults:
@@ -569,6 +582,8 @@ def parse_launch_config(args: argparse.Namespace) -> LaunchConfig:
             raise PiBashError(f"{name} is required")
 
     model_defaults = resolve_model_defaults(cwd, args)
+    stream = bool(args.stream)
+    idle_timeout = resolve_idle_timeout(args.idle_timeout, stream)
 
     return LaunchConfig(
         session_dir=str(args.session_dir),
@@ -588,7 +603,7 @@ def parse_launch_config(args: argparse.Namespace) -> LaunchConfig:
         extensions=tuple(str(extension) for extension in args.extension),
         allow_extensions=bool(args.allow_extensions),
         tools=str(args.tools) if str(args.tools).strip() else None,
-        stream=bool(args.stream),
+        stream=stream,
         raw_events=bool(args.raw_events),
         startup_warn_after=float(args.startup_warn_after),
         shutdown_timeout=float(args.shutdown_timeout),
@@ -596,7 +611,7 @@ def parse_launch_config(args: argparse.Namespace) -> LaunchConfig:
         heartbeat_interval=float(args.heartbeat_interval),
         hang_snapshot_after=float(args.hang_snapshot_after),
         runtime_timeout=float(args.runtime_timeout),
-        idle_timeout=float(args.idle_timeout),
+        idle_timeout=idle_timeout,
         attempt_id=str(args.attempt_id) if args.attempt_id else build_attempt_id(),
         cwd=cwd,
         pi_bin=str(args.pi_bin),
@@ -723,9 +738,10 @@ def run_streaming_pi(
                     activity=activity,
                 )
                 ensure_stream_threads_finished(process, threads, config, paths, stderr_file, stderr_lock)
-            except Exception:
+            except Exception as error:
                 if process.poll() is None:
                     terminate_process_group(process, config.shutdown_timeout, paths.wrapper_log)
+                record_lifecycle_failure(paths, config, command, process, error)
                 join_stream_threads(threads, config.shutdown_timeout)
                 raise
         finally:
@@ -782,9 +798,10 @@ def run_non_streaming_pi(
                 activity=activity,
             )
             ensure_stream_threads_finished(process, threads, config, paths, stderr_file, stderr_lock)
-        except Exception:
+        except Exception as error:
             if process.poll() is None:
                 terminate_process_group(process, config.shutdown_timeout, paths.wrapper_log)
+            record_lifecycle_failure(paths, config, command, process, error)
             join_stream_threads(threads, config.shutdown_timeout)
             raise
     append_wrapper_log(paths.wrapper_log, f"completed_at: {utc_timestamp()}\nexit_code: {return_code}\n")
@@ -798,6 +815,7 @@ def spawn_pi_process(command: Sequence[str], config: LaunchConfig, paths: Launch
         process = subprocess.Popen(
             command,
             cwd=config.cwd,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -821,6 +839,27 @@ def spawn_pi_process(command: Sequence[str], config: LaunchConfig, paths: Launch
     )
     write_latest_manifest(paths, config, command, "spawned", child_pid=process.pid)
     return process
+
+
+def record_lifecycle_failure(
+    paths: LaunchPaths,
+    config: LaunchConfig,
+    command: Sequence[str],
+    process: subprocess.Popen[str],
+    error: BaseException,
+) -> None:
+    """Persist terminal lifecycle failure state for stalled or interrupted child processes."""
+    error_summary = truncate_text(str(error) or error.__class__.__name__, 1000)
+    append_wrapper_log(paths.wrapper_log, f"failed_at: {utc_timestamp()}\nerror: {error_summary}\n")
+    write_latest_manifest(
+        paths,
+        config,
+        command,
+        "failed",
+        child_pid=process.pid,
+        exit_code=process.poll(),
+        error=error_summary,
+    )
 
 
 def stream_stdout_notice(events_log: Path, raw_events_log: Path | None) -> str:
