@@ -76,6 +76,10 @@ def main() -> int:
         print("fake stdout")
         print("fake stderr", file=sys.stderr)
 
+    sleep_after_output = float(os.environ.get("FAKE_PI_SLEEP_AFTER_OUTPUT", "0"))
+    if sleep_after_output:
+        time.sleep(sleep_after_output)
+
     if os.environ.get("FAKE_PI_AUTH_FAILURE", "0") == "1":
         print("No API key found for openai-codex.", file=sys.stderr)
         print("Use /login to log in to a provider via OAuth or API key.", file=sys.stderr)
@@ -245,7 +249,8 @@ def test_pi_bash_success_prints_zero_persists_logs_and_expands_prompt(tmp_path: 
     assert "Write the report and signal files." not in wrapper_text
 
     argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
-    assert argv[:8] == [
+    assert argv[:10] == [
+        "--offline",
         "--no-extensions",
         "--tools",
         "read,bash,edit,write,grep,find,ls",
@@ -254,8 +259,8 @@ def test_pi_bash_success_prints_zero_persists_logs_and_expands_prompt(tmp_path: 
         "--model",
         "example-model-tier",
         "--thinking",
+        "xhigh",
     ]
-    assert argv[8] == "xhigh"
     skill_args = [argv[index + 1] for index, value in enumerate(argv) if value == "--skill"]
     assert skill_args == [
         str(workspace / ".claude" / "skills" / "builder" / "SKILL.md"),
@@ -409,12 +414,30 @@ def test_pi_bash_stream_tees_events_to_logs_and_wrapper_stderr(tmp_path: Path) -
     assert "fake stream stderr\n" in stderr_log.read_text()
 
     argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
-    assert argv[:5] == ["--mode", "json", "--no-extensions", "--tools", "read,bash,edit,write,grep,find,ls"]
+    assert argv[:6] == ["--offline", "--mode", "json", "--no-extensions", "--tools", "read,bash,edit,write,grep,find,ls"]
     assert [argv[index + 1] for index, value in enumerate(argv) if value == "--provider"] == ["openai-codex"]
 
 
-def test_pi_bash_stream_defaults_to_bounded_idle_timeout(tmp_path: Path) -> None:
-    """Streaming workers fail closed by default when child output stalls too long."""
+def test_pi_bash_stream_allows_startup_network_opt_out(tmp_path: Path) -> None:
+    """Explicit startup-network opt-out omits the default pi --offline flag."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+
+    result = run_pi_bash(
+        workspace=workspace,
+        fake_pi=fake_pi,
+        tmp_path=tmp_path,
+        extra_args=["--stream", "--allow-startup-network"],
+    )
+
+    assert result.returncode == 0, result.stderr
+    argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
+    assert "--offline" not in argv
+    assert argv[:5] == ["--mode", "json", "--no-extensions", "--tools", "read,bash,edit,write,grep,find,ls"]
+
+
+def test_pi_bash_stream_defaults_to_bounded_startup_and_idle_timeouts(tmp_path: Path) -> None:
+    """Streaming workers fail closed by default on startup and later output stalls."""
     workspace = create_workspace(tmp_path)
     fake_pi = write_fake_pi(tmp_path)
 
@@ -422,7 +445,9 @@ def test_pi_bash_stream_defaults_to_bounded_idle_timeout(tmp_path: Path) -> None
 
     assert result.returncode == 0, result.stderr
     wrapper_text = log_path(workspace, "wrapper.log").read_text()
+    assert "startup_timeout_seconds: 60" in wrapper_text
     assert "idle_timeout_seconds: 600" in wrapper_text
+    assert "offline: True" in wrapper_text
 
 
 def test_pi_bash_stream_prefixes_child_hook_stderr(tmp_path: Path) -> None:
@@ -571,8 +596,42 @@ def test_pi_bash_stream_cleans_up_inherited_pipe_descendants(tmp_path: Path) -> 
     assert "exit_code: 0" in wrapper_text
 
 
+def test_pi_bash_stream_startup_timeout_terminates_silent_child_and_updates_manifest(tmp_path: Path) -> None:
+    """Streaming workers fail fast when no first child output arrives."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+
+    result = run_pi_bash(
+        workspace=workspace,
+        fake_pi=fake_pi,
+        tmp_path=tmp_path,
+        extra_args=[
+            "--stream",
+            "--startup-warn-after",
+            "0",
+            "--startup-timeout",
+            "0.1",
+            "--idle-timeout",
+            "5",
+            "--shutdown-timeout",
+            "0.1",
+        ],
+        env_overrides={"FAKE_PI_SLEEP_BEFORE_OUTPUT": "5"},
+    )
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "startup timeout reached; terminating child process group" in result.stderr
+    assert "wrapper lifecycle error: pi produced no startup output for 0.1s" in result.stderr
+
+    latest = json.loads((workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.latest.json").read_text())
+    assert latest["status"] == "failed"
+    assert latest["child_pid"]
+    assert "startup output" in latest["error"]
+
+
 def test_pi_bash_stream_idle_timeout_terminates_silent_child_and_updates_manifest(tmp_path: Path) -> None:
-    """Streaming workers terminate stalled children and persist terminal manifest state."""
+    """Streaming workers terminate post-startup stalled children and persist terminal manifest state."""
     workspace = create_workspace(tmp_path)
     fake_pi = write_fake_pi(tmp_path)
 
@@ -581,7 +640,7 @@ def test_pi_bash_stream_idle_timeout_terminates_silent_child_and_updates_manifes
         fake_pi=fake_pi,
         tmp_path=tmp_path,
         extra_args=["--stream", "--startup-warn-after", "0", "--idle-timeout", "0.1", "--shutdown-timeout", "0.1"],
-        env_overrides={"FAKE_PI_SLEEP_BEFORE_OUTPUT": "5"},
+        env_overrides={"FAKE_PI_SLEEP_AFTER_OUTPUT": "5"},
     )
 
     assert result.returncode != 0
@@ -611,7 +670,7 @@ def test_pi_bash_stream_warns_without_killing_when_child_delays_first_event(tmp_
     assert result.returncode == 0, result.stderr
     assert result.stdout == "0"
     assert "no child stdout/stderr after 0.1s in stream mode" in result.stderr
-    assert "continuing without terminating process group" in result.stderr
+    assert "continuing until startup timeout" in result.stderr
     assert "process_tree:" in result.stderr
     assert '"type":"agent_start"' in log_path(workspace, "events.jsonl").read_text()
     wrapper_text = log_path(workspace, "wrapper.log").read_text()

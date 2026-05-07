@@ -114,7 +114,7 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash.py launch \
   --stream
 ```
 
-Operational default: include `--stream` for wrapper launches so live child JSONL events appear in the background Bash task output. Omit it only for low-noise or legacy automation. `pi-bash.py` stream launches fail closed after 600 seconds without child stdout/stderr unless the coordinator passes an explicit `--idle-timeout` override.
+Operational default: include `--stream` for wrapper launches so live child JSONL events appear in the background Bash task output. Omit it only for low-noise or legacy automation. `pi-bash.py` stream launches fail closed after 60 seconds without first child stdout/stderr and after 600 seconds of later child-output silence unless the coordinator passes explicit `--startup-timeout` or `--idle-timeout` overrides.
 
 `pi-bash.py` and `cc-bash.py` validate the declared report and signal files after the child process exits. They do not require an active MUX ledger session; declare-before-dispatch matching is coordinator policy. With `--stream`, they also persist raw child stdout events to `<SESSION_DIR>/logs/<agent-id>.events.jsonl` and mirror child stdout/stderr to wrapper stderr for live viewing. During active MUX execution, watch the background command output instead of tailing logs; after completion or explicit `deactivate.py`, inspect the events, stdout, and stderr logs for diagnostics. See `pi-bash.md` and `cc-bash.md` for optional strict orchestration guidance.
 

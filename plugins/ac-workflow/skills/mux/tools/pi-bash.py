@@ -25,6 +25,8 @@ from typing import Any, Sequence, TextIO
 import yaml  # type: ignore[import-untyped]
 
 DEFAULT_STARTUP_WARN_AFTER_SECONDS = 30.0
+DEFAULT_STREAM_STARTUP_TIMEOUT_SECONDS = 60.0
+DEFAULT_NON_STREAM_STARTUP_TIMEOUT_SECONDS = 0.0
 DEFAULT_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 60.0
 DEFAULT_HANG_SNAPSHOT_AFTER_SECONDS = 120.0
@@ -180,6 +182,7 @@ class LaunchConfig:
     stream: bool
     raw_events: bool
     startup_warn_after: float
+    startup_timeout: float
     shutdown_timeout: float
     mirror_prefix: str | None
     heartbeat_interval: float
@@ -189,6 +192,7 @@ class LaunchConfig:
     attempt_id: str
     cwd: Path
     pi_bin: str
+    offline: bool
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -262,6 +266,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seconds to wait in stream mode for first child stdout/stderr before warning; use 0 to disable",
     )
     launch_parser.add_argument(
+        "--startup-timeout",
+        type=parse_non_negative_float,
+        default=None,
+        help=(
+            "Seconds to wait for first child stdout/stderr before terminating; use 0 to disable. "
+            "Defaults to 60 in stream mode and disabled in non-stream mode."
+        ),
+    )
+    launch_parser.add_argument(
         "--mirror-prefix",
         default="pi> ",
         help="Prefix for live mirrored child output in stream mode",
@@ -307,6 +320,11 @@ def build_parser() -> argparse.ArgumentParser:
     launch_parser.add_argument("--attempt-id", default=None, help="Optional deterministic attempt id for log names")
     launch_parser.add_argument("--cwd", default=".", help="Project root / worker current directory")
     launch_parser.add_argument("--pi-bin", default="pi", help="pi executable path, primarily for tests")
+    launch_parser.add_argument(
+        "--allow-startup-network",
+        action="store_true",
+        help="Allow pi startup network operations by omitting the default --offline flag",
+    )
 
     configure_parser = subparsers.add_parser("configure", help="write pi-bash.yaml defaults")
     configure_parser.add_argument(
@@ -442,6 +460,15 @@ def resolve_idle_timeout(value: float | None, stream: bool) -> float:
     if stream:
         return DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS
     return DEFAULT_IDLE_TIMEOUT_SECONDS
+
+
+def resolve_startup_timeout(value: float | None, stream: bool) -> float:
+    """Return the effective first-output startup timeout for this launch."""
+    if value is not None:
+        return float(value)
+    if stream:
+        return DEFAULT_STREAM_STARTUP_TIMEOUT_SECONDS
+    return DEFAULT_NON_STREAM_STARTUP_TIMEOUT_SECONDS
 
 
 def resolve_model_defaults(cwd: Path, args: argparse.Namespace) -> PiBashModelDefaults:
@@ -583,6 +610,7 @@ def parse_launch_config(args: argparse.Namespace) -> LaunchConfig:
 
     model_defaults = resolve_model_defaults(cwd, args)
     stream = bool(args.stream)
+    startup_timeout = resolve_startup_timeout(args.startup_timeout, stream)
     idle_timeout = resolve_idle_timeout(args.idle_timeout, stream)
 
     return LaunchConfig(
@@ -606,6 +634,7 @@ def parse_launch_config(args: argparse.Namespace) -> LaunchConfig:
         stream=stream,
         raw_events=bool(args.raw_events),
         startup_warn_after=float(args.startup_warn_after),
+        startup_timeout=startup_timeout,
         shutdown_timeout=float(args.shutdown_timeout),
         mirror_prefix=None if args.no_mirror else str(args.mirror_prefix),
         heartbeat_interval=float(args.heartbeat_interval),
@@ -615,6 +644,7 @@ def parse_launch_config(args: argparse.Namespace) -> LaunchConfig:
         attempt_id=str(args.attempt_id) if args.attempt_id else build_attempt_id(),
         cwd=cwd,
         pi_bin=str(args.pi_bin),
+        offline=not bool(args.allow_startup_network),
     )
 
 
@@ -651,6 +681,8 @@ def run_pi(
 def build_pi_command(config: LaunchConfig, skills: Sequence[ResolvedSkill], prompt: str) -> list[str]:
     """Build the shell-free pi argv."""
     command = [config.pi_bin]
+    if config.offline:
+        command.append("--offline")
     if config.stream:
         command.extend(["--mode", "json"])
     if not config.allow_extensions:
@@ -719,13 +751,16 @@ def run_streaming_pi(
             stdout_thread.start()
             stderr_thread.start()
             try:
-                emit_startup_warning_if_silent(
+                supervise_startup_until_first_output_or_timeout(
                     process=process,
                     first_output=first_output,
-                    startup_warn_after=config.startup_warn_after,
+                    config=config,
+                    paths=paths,
+                    report_abs=report_abs,
+                    signal_abs=signal_abs,
                     stderr_file=stderr_file,
                     stderr_lock=stderr_lock,
-                    wrapper_log=paths.wrapper_log,
+                    activity=activity,
                 )
                 return_code = wait_for_supervised_process(
                     process=process,
@@ -766,6 +801,7 @@ def run_non_streaming_pi(
         raise PiBashError("failed to capture pi stdout/stderr")
 
     stderr_lock = Lock()
+    first_output = Event()
     activity = OutputActivity(last_output_monotonic=time.monotonic(), lock=Lock())
     with paths.stdout_log.open("w", encoding="utf-8", buffering=1) as stdout_file, paths.stderr_log.open(
         "w",
@@ -775,18 +811,30 @@ def run_non_streaming_pi(
         emit_wrapper_diagnostic(spawn_notice(process, config, paths), stderr_file, stderr_lock, paths.wrapper_log)
         stdout_thread = Thread(
             target=tee_plain_stream,
-            args=(process.stdout, (stdout_file,), activity),
+            args=(process.stdout, (stdout_file,), activity, first_output),
             daemon=True,
         )
         stderr_thread = Thread(
             target=tee_plain_stream,
-            args=(process.stderr, (stderr_file,), activity),
+            args=(process.stderr, (stderr_file,), activity, first_output),
             daemon=True,
         )
         threads = (stdout_thread, stderr_thread)
         stdout_thread.start()
         stderr_thread.start()
         try:
+            if config.startup_timeout > 0:
+                supervise_startup_until_first_output_or_timeout(
+                    process=process,
+                    first_output=first_output,
+                    config=config,
+                    paths=paths,
+                    report_abs=report_abs,
+                    signal_abs=signal_abs,
+                    stderr_file=stderr_file,
+                    stderr_lock=stderr_lock,
+                    activity=activity,
+                )
             return_code = wait_for_supervised_process(
                 process=process,
                 config=config,
@@ -929,9 +977,16 @@ def write_mirrored_chunk(chunk: str, mirror_prefix: str | None, stderr_lock: Loc
         sys.stderr.flush()
 
 
-def tee_plain_stream(source: TextIO, log_files: Sequence[TextIO], activity: OutputActivity) -> None:
+def tee_plain_stream(
+    source: TextIO,
+    log_files: Sequence[TextIO],
+    activity: OutputActivity,
+    first_output: Event | None = None,
+) -> None:
     """Copy child stream to log files without mirroring raw output to wrapper stderr."""
     for chunk in source:
+        if first_output is not None:
+            first_output.set()
         activity.mark()
         for log_file in log_files:
             log_file.write(chunk)
@@ -1128,9 +1183,11 @@ def ensure_stream_threads_finished(
 def spawn_notice(process: subprocess.Popen[str], config: LaunchConfig, paths: LaunchPaths) -> str:
     """Return a sanitized one-line spawn notice for background Bash visibility."""
     startup_warn = "disabled" if config.startup_warn_after <= 0 else f"{config.startup_warn_after:g}s"
+    startup_timeout = "disabled" if config.startup_timeout <= 0 else f"{config.startup_timeout:g}s"
     return (
         f"pi-bash: spawned pid={process.pid} attempt={config.attempt_id} stream={config.stream} "
-        f"events={paths.events_log} startup-warn-after={startup_warn}\n"
+        f"events={paths.events_log} startup-warn-after={startup_warn} "
+        f"startup-timeout={startup_timeout}\n"
     )
 
 
@@ -1151,31 +1208,60 @@ def artifact_state(path: Path) -> str:
     return f"present size={path_size(path)} path={path}"
 
 
-def emit_startup_warning_if_silent(
+def supervise_startup_until_first_output_or_timeout(
     *,
     process: subprocess.Popen[str],
     first_output: Event,
-    startup_warn_after: float,
+    config: LaunchConfig,
+    paths: LaunchPaths,
+    report_abs: Path,
+    signal_abs: Path,
     stderr_file: TextIO,
     stderr_lock: Lock,
-    wrapper_log: Path,
+    activity: OutputActivity,
 ) -> None:
-    """Warn when a stream worker has not emitted its first line yet."""
-    if startup_warn_after <= 0 or first_output.is_set():
+    """Warn and optionally fail closed while waiting for the first child output."""
+    if first_output.is_set():
+        return
+    if config.startup_warn_after <= 0 and config.startup_timeout <= 0:
         return
 
-    deadline = time.monotonic() + startup_warn_after
+    started = time.monotonic()
+    warn_deadline = started + config.startup_warn_after if config.startup_warn_after > 0 else float("inf")
+    timeout_deadline = started + config.startup_timeout if config.startup_timeout > 0 else float("inf")
+    warned = False
     while process.poll() is None and not first_output.is_set():
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
+        now = time.monotonic()
+        if not warned and now >= warn_deadline:
             process_tree = format_process_tree(process.pid)
             message = (
-                f"no child stdout/stderr after {startup_warn_after:g}s in stream mode; "
-                f"continuing without terminating process group {process.pid}\n{process_tree}\n"
+                f"no child stdout/stderr after {config.startup_warn_after:g}s in stream mode; "
+                f"continuing until startup timeout for process group {process.pid}\n{process_tree}\n"
             )
-            emit_wrapper_diagnostic(message, stderr_file, stderr_lock, wrapper_log)
-            return
-        first_output.wait(min(0.25, remaining))
+            emit_wrapper_diagnostic(message, stderr_file, stderr_lock, paths.wrapper_log)
+            warned = True
+            continue
+
+        if now >= timeout_deadline:
+            elapsed = now - started
+            emit_supervision_snapshot(
+                "startup timeout reached; terminating child process group",
+                process,
+                config,
+                paths,
+                report_abs,
+                signal_abs,
+                elapsed,
+                activity,
+                stderr_file,
+                stderr_lock,
+            )
+            terminate_process_group(process, config.shutdown_timeout, paths.wrapper_log)
+            raise PiBashError(f"pi produced no startup output for {config.startup_timeout:g}s; see wrapper log")
+
+        next_deadline = min(warn_deadline if not warned else float("inf"), timeout_deadline)
+        wait_for = 0.25 if next_deadline == float("inf") else min(0.25, max(0.0, next_deadline - now))
+        first_output.wait(wait_for)
 
 
 def join_stream_threads(threads: Sequence[Thread], timeout: float) -> bool:
@@ -1242,12 +1328,14 @@ def write_launch_metadata(
         f"thinking: {config.thinking}",
         f"model_config_sources: {', '.join(config.model_config_sources)}",
         f"startup_warn_after_seconds: {config.startup_warn_after:g}",
+        f"startup_timeout_seconds: {config.startup_timeout:g}",
         f"shutdown_timeout_seconds: {config.shutdown_timeout:g}",
         f"mirror_prefix: {config.mirror_prefix or ''}",
         f"heartbeat_interval_seconds: {config.heartbeat_interval:g}",
         f"hang_snapshot_after_seconds: {config.hang_snapshot_after:g}",
         f"runtime_timeout_seconds: {config.runtime_timeout:g}",
         f"idle_timeout_seconds: {config.idle_timeout:g}",
+        f"offline: {config.offline}",
         f"prompt_bytes: {len(prompt.encode('utf-8'))}",
         f"skill_count: {skill_count}",
         f"stdout_log: {paths.stdout_log}",
@@ -1282,6 +1370,7 @@ def write_latest_manifest(
         "provider": config.provider,
         "model": config.model,
         "thinking": config.thinking,
+        "offline": config.offline,
         "model_config_sources": list(config.model_config_sources),
         "command": render_command_preview(command),
         "stdout_log": str(paths.stdout_log),

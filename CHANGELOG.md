@@ -25,7 +25,7 @@ All notable changes to agentic-config.
 
 ### Fixed
 
-- `pi-ac-workflow`: make `pi-bash.py` stream workers fail closed on prolonged child-output silence, run child stdin from `DEVNULL`, and persist failed lifecycle state in the latest-attempt manifest.
+- `pi-ac-workflow`: make `pi-bash.py` stream workers fail closed on prolonged child-output silence, fail fast on silent startup, run child stdin from `DEVNULL`, default inner launches to `--offline`, and persist failed lifecycle state in the latest-attempt manifest.
 
 ## [0.3.0] - 2026-04-30
 

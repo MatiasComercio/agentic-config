@@ -24,7 +24,7 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch \
   --stream
 ```
 
-Operational default: include `--stream` for MUX launches so the coordinator can watch worker turn/tool events in the background command output. Omit it only for low-noise automation. Startup silence is warning-only because `pi --mode json` can be legitimately silent before its first model/tool event; use `--startup-warn-after N` to tune or disable that diagnostic. Extended output silence is fail-closed: stream launches default to `--idle-timeout 600`, `--idle-timeout N` tunes the threshold, and `--idle-timeout 0` disables it only for explicitly justified cases.
+Operational default: include `--stream` for MUX launches so the coordinator can watch worker turn/tool events in the background command output. Omit it only for low-noise automation. Startup silence has two separate gates: `--startup-warn-after N` warns, and stream launches default to `--startup-timeout 60` to terminate if no first stdout/stderr line arrives. Extended output silence is also fail-closed: stream launches default to `--idle-timeout 600`, `--startup-timeout N` / `--idle-timeout N` tune the thresholds, and `--startup-timeout 0` / `--idle-timeout 0` disable gates only for explicitly justified cases.
 
 Always make provider, model, and thinking explicit either in the launch command or in `pi-bash.yaml`. Config precedence mirrors the safety config pattern: project `./pi-bash.yaml` > user `~/.claude/pi-bash.yaml` > wrapper `pi-bash.default.yaml`. The bundled default is `openai-codex` / `gpt-5.5` / `xhigh`.
 
@@ -57,6 +57,7 @@ The wrapper is a foreground supervisor. If the worker should run in the backgrou
 - passes requested skills to pi with repeatable `--skill` arguments
 - always passes explicit `--provider`, `--model`, and `--thinking` to pi, resolved from CLI flags or `pi-bash.yaml`
 - with `--stream`, runs pi with `--mode json`
+- passes `--offline` to pi by default to avoid startup network checks before first output; `--allow-startup-network` opts out
 - writes attempt-scoped logs to `logs/<agent-id>.<attempt-id>.*`
 - writes `logs/<agent-id>.latest.json` so retries never overwrite prior evidence
 - writes wrapper-side launch diagnostics before child output exists
@@ -65,9 +66,10 @@ The wrapper is a foreground supervisor. If the worker should run in the backgrou
 - with `--stream --raw-events`, additionally writes unsanitized child stdout JSONL to `.raw-events.jsonl`
 - with `--stream`, mirrors sanitized child stdout events and raw child stderr to wrapper stderr with a `pi> ` prefix for live viewing
 - with `--no-mirror`, suppresses live child output while keeping logs and events
-- with `--startup-warn-after`, warns if no first stdout/stderr line arrives before the threshold without killing the child
+- with `--startup-warn-after`, warns if no first stdout/stderr line arrives before the threshold
+- with `--startup-timeout`, fails terminally if no first stdout/stderr line arrives before the threshold
 - supervises stream and non-stream children with heartbeat diagnostics, optional runtime/idle timeouts, and sanitized process/session snapshots
-- fails terminally on default stream idle timeout and records failed lifecycle state in `logs/<agent-id>.latest.json`
+- fails terminally on default stream startup/idle timeouts and records failed lifecycle state in `logs/<agent-id>.latest.json`
 - defaults to `--no-extensions` with a built-in tool allowlist unless explicitly overridden
 - bounds stream-reader shutdown after child exit and logs cleanup warnings before protocol validation
 - removes stale declared report and signal files before launch
