@@ -22,7 +22,7 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Sequence, TextIO
 
-DEFAULT_STARTUP_TIMEOUT_SECONDS = 0.0
+DEFAULT_STARTUP_WARN_AFTER_SECONDS = 30.0
 DEFAULT_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 60.0
 DEFAULT_HANG_SNAPSHOT_AFTER_SECONDS = 120.0
@@ -159,8 +159,9 @@ class LaunchConfig:
     tools: str | None
     stream: bool
     raw_events: bool
-    startup_timeout: float
+    startup_warn_after: float
     shutdown_timeout: float
+    mirror_prefix: str | None
     heartbeat_interval: float
     hang_snapshot_after: float
     runtime_timeout: float
@@ -230,13 +231,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="In stream mode, additionally persist unsanitized child stdout to logs/<agent-id>.raw-events.jsonl",
     )
     launch_parser.add_argument(
-        "--startup-timeout",
+        "--startup-warn-after",
         type=parse_non_negative_float,
-        default=DEFAULT_STARTUP_TIMEOUT_SECONDS,
-        help=(
-            "Seconds to wait in stream mode for the first child stdout/stderr line before terminating; "
-            "use 0 to disable"
-        ),
+        default=DEFAULT_STARTUP_WARN_AFTER_SECONDS,
+        help="Seconds to wait in stream mode for first child stdout/stderr before warning; use 0 to disable",
+    )
+    launch_parser.add_argument(
+        "--mirror-prefix",
+        default="pi> ",
+        help="Prefix for live mirrored child output in stream mode",
+    )
+    launch_parser.add_argument(
+        "--no-mirror",
+        action="store_true",
+        help="Disable live child output mirroring; logs and events are still captured",
     )
     launch_parser.add_argument(
         "--shutdown-timeout",
@@ -293,18 +301,38 @@ def launch_from_args(args: argparse.Namespace) -> int:
     paths = log_paths(config.cwd, config.session_dir, config.agent_id, config.attempt_id)
     report_abs = resolve_project_path(config.cwd, config.report_path)
     signal_abs = resolve_project_path(config.cwd, config.signal_path)
-    clear_previous_signal(signal_abs)
+    clear_previous_artifacts(report_abs=report_abs, signal_abs=signal_abs)
 
-    result = run_pi(config, resolved_skills, prompt, paths, report_abs, signal_abs)
-    if result != 0:
-        raise PiBashError(f"pi exited with code {result}; see {paths.stdout_log} and {paths.stderr_log}")
+    result: int | None = None
+    lifecycle_error: PiBashError | None = None
+    try:
+        result = run_pi(config, resolved_skills, prompt, paths, report_abs, signal_abs)
+    except PiBashError as error:
+        lifecycle_error = error
 
-    validate_protocol_outputs(
-        report_abs=report_abs,
-        signal_abs=signal_abs,
-        report_path_arg=config.report_path,
-        cwd=config.cwd,
-    )
+    try:
+        validate_protocol_outputs(
+            report_abs=report_abs,
+            signal_abs=signal_abs,
+            report_path_arg=config.report_path,
+            cwd=config.cwd,
+        )
+    except PiBashError as protocol_error:
+        details: list[str] = []
+        if result is not None and result != 0:
+            details.append(f"pi exited with code {result}")
+        if lifecycle_error is not None:
+            details.append(f"wrapper lifecycle error: {lifecycle_error}")
+        suffix = f"; {'; '.join(details)}" if details else ""
+        raise PiBashError(f"{protocol_error}{suffix}; see {paths.stdout_log} and {paths.stderr_log}") from protocol_error
+
+    if (result is not None and result != 0) or lifecycle_error is not None:
+        record_protocol_success_diagnostic(
+            stderr_log=paths.stderr_log,
+            wrapper_log=paths.wrapper_log,
+            result=result,
+            lifecycle_error=lifecycle_error,
+        )
     sys.stdout.write("0")
     return 0
 
@@ -351,8 +379,9 @@ def parse_launch_config(args: argparse.Namespace) -> LaunchConfig:
         tools=str(args.tools) if str(args.tools).strip() else None,
         stream=bool(args.stream),
         raw_events=bool(args.raw_events),
-        startup_timeout=float(args.startup_timeout),
+        startup_warn_after=float(args.startup_warn_after),
         shutdown_timeout=float(args.shutdown_timeout),
+        mirror_prefix=None if args.no_mirror else str(args.mirror_prefix),
         heartbeat_interval=float(args.heartbeat_interval),
         hang_snapshot_after=float(args.hang_snapshot_after),
         runtime_timeout=float(args.runtime_timeout),
@@ -445,26 +474,34 @@ def run_streaming_pi(
         try:
             stdout_thread = Thread(
                 target=tee_stdout_stream,
-                args=(process.stdout, stdout_file, events_file, raw_events_file, stderr_lock, first_output, activity),
+                args=(
+                    process.stdout,
+                    stdout_file,
+                    events_file,
+                    raw_events_file,
+                    stderr_lock,
+                    first_output,
+                    activity,
+                    config.mirror_prefix,
+                ),
                 daemon=True,
             )
             stderr_thread = Thread(
                 target=tee_stderr_stream,
-                args=(process.stderr, (stderr_file,), stderr_lock, first_output, activity, True),
+                args=(process.stderr, (stderr_file,), stderr_lock, first_output, activity, config.mirror_prefix),
                 daemon=True,
             )
             threads = (stdout_thread, stderr_thread)
             stdout_thread.start()
             stderr_thread.start()
             try:
-                enforce_startup_timeout(
+                emit_startup_warning_if_silent(
                     process=process,
                     first_output=first_output,
-                    startup_timeout=config.startup_timeout,
+                    startup_warn_after=config.startup_warn_after,
                     stderr_file=stderr_file,
                     stderr_lock=stderr_lock,
                     wrapper_log=paths.wrapper_log,
-                    shutdown_timeout=config.shutdown_timeout,
                 )
                 return_code = wait_for_supervised_process(
                     process=process,
@@ -595,6 +632,7 @@ def tee_stdout_stream(
     stderr_lock: Lock,
     first_output: Event,
     activity: OutputActivity,
+    mirror_prefix: str | None,
 ) -> None:
     """Copy child stdout into lean event logs while avoiding raw JSON duplication."""
     for chunk in source:
@@ -612,9 +650,7 @@ def tee_stdout_stream(
             events_file.write(lean_event)
             events_file.flush()
             mirrored = lean_event
-        with stderr_lock:
-            sys.stderr.write(mirrored)
-            sys.stderr.flush()
+        write_mirrored_chunk(mirrored, mirror_prefix, stderr_lock)
 
 
 def tee_stderr_stream(
@@ -623,7 +659,7 @@ def tee_stderr_stream(
     stderr_lock: Lock,
     first_output: Event,
     activity: OutputActivity,
-    mirror: bool,
+    mirror_prefix: str | None,
 ) -> None:
     """Copy child stderr to logs and optionally wrapper stderr."""
     for chunk in source:
@@ -632,10 +668,17 @@ def tee_stderr_stream(
         for log_file in log_files:
             log_file.write(chunk)
             log_file.flush()
-        if mirror:
-            with stderr_lock:
-                sys.stderr.write(chunk)
-                sys.stderr.flush()
+        write_mirrored_chunk(chunk, mirror_prefix, stderr_lock)
+
+
+def write_mirrored_chunk(chunk: str, mirror_prefix: str | None, stderr_lock: Lock) -> None:
+    """Write live mirrored child output with an attribution prefix."""
+    if mirror_prefix is None:
+        return
+    with stderr_lock:
+        for line in chunk.splitlines(keepends=True):
+            sys.stderr.write(f"{mirror_prefix}{line}")
+        sys.stderr.flush()
 
 
 def tee_plain_stream(source: TextIO, log_files: Sequence[TextIO], activity: OutputActivity) -> None:
@@ -826,15 +869,20 @@ def ensure_stream_threads_finished(
         return
     signal_process_group(process.pid, SIGKILL, paths.wrapper_log)
     if not join_stream_threads(threads, config.shutdown_timeout):
-        raise PiBashError(f"stream readers did not finish after child exit; see {paths.stdout_log} and {paths.stderr_log}")
+        emit_wrapper_diagnostic(
+            "stream readers are still alive after cleanup; continuing to protocol validation\n",
+            stderr_file,
+            stderr_lock,
+            paths.wrapper_log,
+        )
 
 
 def spawn_notice(process: subprocess.Popen[str], config: LaunchConfig, paths: LaunchPaths) -> str:
     """Return a sanitized one-line spawn notice for background Bash visibility."""
-    startup = "disabled" if config.startup_timeout <= 0 else f"{config.startup_timeout:g}s"
+    startup_warn = "disabled" if config.startup_warn_after <= 0 else f"{config.startup_warn_after:g}s"
     return (
         f"pi-bash: spawned pid={process.pid} attempt={config.attempt_id} stream={config.stream} "
-        f"events={paths.events_log} startup-timeout={startup}\n"
+        f"events={paths.events_log} startup-warn-after={startup_warn}\n"
     )
 
 
@@ -855,34 +903,30 @@ def artifact_state(path: Path) -> str:
     return f"present size={path_size(path)} path={path}"
 
 
-def enforce_startup_timeout(
+def emit_startup_warning_if_silent(
     *,
     process: subprocess.Popen[str],
     first_output: Event,
-    startup_timeout: float,
+    startup_warn_after: float,
     stderr_file: TextIO,
     stderr_lock: Lock,
     wrapper_log: Path,
-    shutdown_timeout: float,
 ) -> None:
-    """Terminate a stream worker that never emits its first line."""
-    if startup_timeout <= 0 or first_output.is_set():
+    """Warn when a stream worker has not emitted its first line yet."""
+    if startup_warn_after <= 0 or first_output.is_set():
         return
 
-    deadline = time.monotonic() + startup_timeout
+    deadline = time.monotonic() + startup_warn_after
     while process.poll() is None and not first_output.is_set():
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             process_tree = format_process_tree(process.pid)
             message = (
-                f"no child stdout/stderr after {startup_timeout:g}s in stream mode; "
-                f"terminating process group {process.pid}\n{process_tree}\n"
+                f"no child stdout/stderr after {startup_warn_after:g}s in stream mode; "
+                f"continuing without terminating process group {process.pid}\n{process_tree}\n"
             )
             emit_wrapper_diagnostic(message, stderr_file, stderr_lock, wrapper_log)
-            terminate_process_group(process, shutdown_timeout, wrapper_log)
-            raise PiBashError(
-                f"pi produced no stdout/stderr within {startup_timeout:g}s in stream mode; see wrapper/stderr logs"
-            )
+            return
         first_output.wait(min(0.25, remaining))
 
 
@@ -947,8 +991,9 @@ def write_launch_metadata(
         f"tools: {config.tools or ''}",
         f"model: {config.model}",
         f"thinking: {config.thinking or ''}",
-        f"startup_timeout_seconds: {config.startup_timeout:g}",
+        f"startup_warn_after_seconds: {config.startup_warn_after:g}",
         f"shutdown_timeout_seconds: {config.shutdown_timeout:g}",
+        f"mirror_prefix: {config.mirror_prefix or ''}",
         f"heartbeat_interval_seconds: {config.heartbeat_interval:g}",
         f"hang_snapshot_after_seconds: {config.hang_snapshot_after:g}",
         f"runtime_timeout_seconds: {config.runtime_timeout:g}",
@@ -1502,13 +1547,39 @@ def resolve_project_path(cwd: Path, value: str) -> Path:
     return path.resolve(strict=False)
 
 
-def clear_previous_signal(signal_abs: Path) -> None:
-    """Remove any prior signal so success must come from this launch."""
-    if not signal_abs.exists():
+def clear_previous_artifacts(*, report_abs: Path, signal_abs: Path) -> None:
+    """Remove prior protocol artifacts so success must come from this launch."""
+    clear_previous_artifact(report_abs, "report")
+    clear_previous_artifact(signal_abs, "signal")
+
+
+def clear_previous_artifact(path: Path, artifact_name: str) -> None:
+    """Remove one prior protocol artifact if it is a regular file."""
+    if not path.exists():
         return
-    if not signal_abs.is_file():
-        raise PiBashError(f"declared signal path exists and is not a file: {signal_abs}")
-    signal_abs.unlink()
+    if not path.is_file():
+        raise PiBashError(f"declared {artifact_name} path exists and is not a file: {path}")
+    path.unlink()
+
+
+def record_protocol_success_diagnostic(
+    *,
+    stderr_log: Path,
+    wrapper_log: Path,
+    result: int | None,
+    lifecycle_error: PiBashError | None,
+) -> None:
+    """Record non-fatal child issues when protocol validation succeeded."""
+    details: list[str] = []
+    if result is not None and result != 0:
+        details.append(f"child_exit_code={result}")
+    if lifecycle_error is not None:
+        details.append(f"lifecycle_error={lifecycle_error}")
+    message = f"pi-bash: protocol valid; treating child issue as success ({'; '.join(details)})\n"
+    append_wrapper_log(wrapper_log, message)
+    stderr_log.parent.mkdir(parents=True, exist_ok=True)
+    with stderr_log.open("a", encoding="utf-8") as log_file:
+        log_file.write(message)
 
 
 def validate_protocol_outputs(

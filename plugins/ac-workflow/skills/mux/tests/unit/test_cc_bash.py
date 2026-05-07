@@ -63,6 +63,8 @@ def main() -> int:
                 flush=True,
             )
         print(json.dumps({{"type": "tool_use", "name": "Read"}}), flush=True)
+        if os.environ.get("FAKE_CC_PRETOOL_STDERR", "0") == "1":
+            print("PreToolUse:Bash says:", file=sys.stderr, flush=True)
         print("fake claude stream stderr", file=sys.stderr, flush=True)
     else:
         print("fake claude stdout")
@@ -106,6 +108,8 @@ def main() -> int:
             "status: success\\n"
             "created_at: 2026-05-05T00:00:00+00:00\\n"
         )
+    if os.environ.get("FAKE_CC_EXIT_AFTER_ARTIFACTS", "0") != "0":
+        return int(os.environ["FAKE_CC_EXIT_AFTER_ARTIFACTS"])
     return 0
 
 
@@ -299,7 +303,7 @@ def test_cc_bash_stream_overrides_output_format_and_tees_events(tmp_path: Path) 
     assert result.stdout == "0"
     assert '"type":"message_start"' in result.stderr
     assert '"type":"tool_use"' in result.stderr
-    assert "fake claude stream stderr" in result.stderr
+    assert "cc> fake claude stream stderr" in result.stderr
 
     stdout_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stdout.log"
     stderr_log = workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stderr.log"
@@ -314,6 +318,46 @@ def test_cc_bash_stream_overrides_output_format_and_tees_events(tmp_path: Path) 
     argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
     assert argv[:4] == ["--model", "opus", "--output-format", "stream-json"]
     assert "--verbose" in argv
+
+
+def test_cc_bash_stream_prefixes_child_hook_stderr(tmp_path: Path) -> None:
+    """Mirrored child hook output is attributable to the inner Claude Code worker."""
+    workspace = create_workspace(tmp_path)
+    fake_claude = write_fake_executable(tmp_path, "claude")
+
+    result = run_cc_bash(
+        workspace=workspace,
+        tmp_path=tmp_path,
+        path_value=str(fake_claude.parent),
+        extra_args=["--stream"],
+        env_overrides={"FAKE_CC_PRETOOL_STDERR": "1"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "cc> PreToolUse:Bash says:" in result.stderr
+    stderr_text = (workspace / "tmp" / "mux" / "session" / "logs" / "agent-1.stderr.log").read_text()
+    assert "PreToolUse:Bash says:" in stderr_text
+    assert "cc> PreToolUse:Bash says:" not in stderr_text
+
+
+def test_cc_bash_stream_no_mirror_preserves_logs(tmp_path: Path) -> None:
+    """No-mirror mode suppresses live child output while keeping logs and events."""
+    workspace = create_workspace(tmp_path)
+    fake_claude = write_fake_executable(tmp_path, "claude")
+
+    result = run_cc_bash(
+        workspace=workspace,
+        tmp_path=tmp_path,
+        path_value=str(fake_claude.parent),
+        extra_args=["--stream", "--no-mirror"],
+    )
+
+    logs_dir = workspace / "tmp" / "mux" / "session" / "logs"
+    assert result.returncode == 0, result.stderr
+    assert '"type":"message_start"' not in result.stderr
+    assert "fake claude stream stderr" not in result.stderr
+    assert '"type":"message_start"' in (logs_dir / "agent-1.events.jsonl").read_text()
+    assert "fake claude stream stderr\n" in (logs_dir / "agent-1.stderr.log").read_text()
 
 
 def test_cc_bash_stream_sanitizes_events_with_raw_opt_in(tmp_path: Path) -> None:
@@ -366,8 +410,8 @@ def test_cc_bash_stream_cleans_up_inherited_pipe_descendants(tmp_path: Path) -> 
     assert "exit_code: 0" in wrapper_text
 
 
-def test_cc_bash_stream_fails_fast_when_child_never_emits_first_event(tmp_path: Path) -> None:
-    """Streaming workers get a startup watchdog instead of silent empty events logs."""
+def test_cc_bash_stream_warns_without_killing_when_child_delays_first_event(tmp_path: Path) -> None:
+    """Streaming workers warn on startup silence without killing a healthy child."""
     workspace = create_workspace(tmp_path)
     fake_claude = write_fake_executable(tmp_path, "claude")
 
@@ -375,18 +419,18 @@ def test_cc_bash_stream_fails_fast_when_child_never_emits_first_event(tmp_path: 
         workspace=workspace,
         tmp_path=tmp_path,
         path_value=str(fake_claude.parent),
-        extra_args=["--stream", "--startup-timeout", "0.1", "--shutdown-timeout", "0.1"],
-        env_overrides={"FAKE_CC_SLEEP_BEFORE_OUTPUT": "5"},
+        extra_args=["--stream", "--startup-warn-after", "0.1", "--shutdown-timeout", "0.1"],
+        env_overrides={"FAKE_CC_SLEEP_BEFORE_OUTPUT": "0.2"},
     )
 
-    assert result.returncode != 0
-    assert result.stdout == ""
-    assert "Claude Code produced no stdout/stderr within 0.1s in stream mode" in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "0"
+    assert "no child stdout/stderr after 0.1s in stream mode" in result.stderr
+    assert "continuing without terminating process group" in result.stderr
     assert "process_tree:" in result.stderr
 
     logs_dir = workspace / "tmp" / "mux" / "session" / "logs"
-    assert (logs_dir / "agent-1.events.jsonl").read_text() == ""
-    assert "no child stdout/stderr after 0.1s" in (logs_dir / "agent-1.stderr.log").read_text()
+    assert '"type":"message_start"' in (logs_dir / "agent-1.events.jsonl").read_text()
     wrapper_text = (logs_dir / "agent-1.wrapper.log").read_text()
     assert "child_pid:" in wrapper_text
     assert "command:" in wrapper_text
@@ -405,6 +449,58 @@ def test_cc_bash_falls_back_to_npx_package_when_claude_is_unavailable(tmp_path: 
     assert result.returncode == 0, result.stderr
     argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
     assert argv[:4] == ["-y", "@anthropic-ai/claude-code", "--model", "opus"]
+
+
+def test_cc_bash_nonzero_child_with_valid_protocol_succeeds(tmp_path: Path) -> None:
+    """A valid report and success signal are authoritative over child exit code."""
+    workspace = create_workspace(tmp_path)
+    fake_claude = write_fake_executable(tmp_path, "claude")
+
+    result = run_cc_bash(
+        workspace=workspace,
+        tmp_path=tmp_path,
+        path_value=str(fake_claude.parent),
+        env_overrides={"FAKE_CC_EXIT_AFTER_ARTIFACTS": "3"},
+    )
+
+    logs_dir = workspace / "tmp" / "mux" / "session" / "logs"
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "0"
+    assert "protocol valid; treating child issue as success" in (logs_dir / "agent-1.stderr.log").read_text()
+    assert "child_exit_code=3" in (logs_dir / "agent-1.wrapper.log").read_text()
+
+
+def test_cc_bash_clears_stale_protocol_artifacts_before_launch(tmp_path: Path) -> None:
+    """Stale report and signal files cannot satisfy a later launch."""
+    workspace = create_workspace(tmp_path)
+    fake_claude = write_fake_executable(tmp_path, "claude")
+    report_path = workspace / "tmp" / "mux" / "session" / "review" / "agent-1.md"
+    signal_path = workspace / "tmp" / "mux" / "session" / ".signals" / "agent-1.done"
+    report_path.parent.mkdir(parents=True)
+    signal_path.parent.mkdir(parents=True)
+    report_path.write_text(
+        "# Worker Report\n\n"
+        "## Table of Contents\n"
+        "- Executive Summary\n\n"
+        "## Executive Summary\n"
+        "Stale.\n\n"
+        "### Next Steps\n"
+        "- Continue.\n"
+    )
+    signal_path.write_text("path: tmp/mux/session/review/agent-1.md\nstatus: success\n")
+
+    result = run_cc_bash(
+        workspace=workspace,
+        tmp_path=tmp_path,
+        path_value=str(fake_claude.parent),
+        env_overrides={"FAKE_CC_WRITE_ARTIFACTS": "0"},
+    )
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "missing report file" in result.stderr
+    assert not report_path.exists()
+    assert not signal_path.exists()
 
 
 GENERIC_FAILURE_CASES = [

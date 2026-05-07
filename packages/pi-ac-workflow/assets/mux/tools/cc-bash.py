@@ -23,7 +23,7 @@ from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Sequence, TextIO
 
-DEFAULT_STARTUP_TIMEOUT_SECONDS = 60.0
+DEFAULT_STARTUP_WARN_AFTER_SECONDS = 30.0
 DEFAULT_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 # Do not import stdlib signal here: this directory also contains signal.py.
 SIGTERM = 15
@@ -126,8 +126,9 @@ class LaunchConfig:
     output_format: str
     stream: bool
     raw_events: bool
-    startup_timeout: float
+    startup_warn_after: float
     shutdown_timeout: float
+    mirror_prefix: str | None
     allowed_tools: tuple[str, ...]
     disallowed_tools: tuple[str, ...]
     add_dirs: tuple[str, ...]
@@ -237,13 +238,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="In stream mode, additionally persist unsanitized child stdout to logs/<agent-id>.raw-events.jsonl",
     )
     launch_parser.add_argument(
-        "--startup-timeout",
+        "--startup-warn-after",
         type=parse_non_negative_float,
-        default=DEFAULT_STARTUP_TIMEOUT_SECONDS,
-        help=(
-            "Seconds to wait in stream mode for the first child stdout/stderr line before terminating; "
-            "use 0 to disable"
-        ),
+        default=DEFAULT_STARTUP_WARN_AFTER_SECONDS,
+        help="Seconds to wait in stream mode for first child stdout/stderr before warning; use 0 to disable",
+    )
+    launch_parser.add_argument(
+        "--mirror-prefix",
+        default="cc> ",
+        help="Prefix for live mirrored child output in stream mode",
+    )
+    launch_parser.add_argument(
+        "--no-mirror",
+        action="store_true",
+        help="Disable live child output mirroring; logs and events are still captured",
     )
     launch_parser.add_argument(
         "--shutdown-timeout",
@@ -288,27 +296,47 @@ def launch_from_args(args: argparse.Namespace) -> int:
     )
     report_abs = resolve_project_path(config.cwd, config.report_path)
     signal_abs = resolve_project_path(config.cwd, config.signal_path)
-    clear_previous_signal(signal_abs)
+    clear_previous_artifacts(report_abs=report_abs, signal_abs=signal_abs)
 
-    result = run_claude(
-        config,
-        append_system_prompt,
-        prompt,
-        stdout_log,
-        stderr_log,
-        events_log,
-        raw_events_log,
-        wrapper_log,
-    )
-    if result != 0:
-        raise CCBashError(f"Claude Code exited with code {result}; see {stdout_log} and {stderr_log}")
+    result: int | None = None
+    lifecycle_error: CCBashError | None = None
+    try:
+        result = run_claude(
+            config,
+            append_system_prompt,
+            prompt,
+            stdout_log,
+            stderr_log,
+            events_log,
+            raw_events_log,
+            wrapper_log,
+        )
+    except CCBashError as error:
+        lifecycle_error = error
 
-    validate_protocol_outputs(
-        report_abs=report_abs,
-        signal_abs=signal_abs,
-        report_path_arg=config.report_path,
-        cwd=config.cwd,
-    )
+    try:
+        validate_protocol_outputs(
+            report_abs=report_abs,
+            signal_abs=signal_abs,
+            report_path_arg=config.report_path,
+            cwd=config.cwd,
+        )
+    except CCBashError as protocol_error:
+        details: list[str] = []
+        if result is not None and result != 0:
+            details.append(f"Claude Code exited with code {result}")
+        if lifecycle_error is not None:
+            details.append(f"wrapper lifecycle error: {lifecycle_error}")
+        suffix = f"; {'; '.join(details)}" if details else ""
+        raise CCBashError(f"{protocol_error}{suffix}; see {stdout_log} and {stderr_log}") from protocol_error
+
+    if (result is not None and result != 0) or lifecycle_error is not None:
+        record_protocol_success_diagnostic(
+            stderr_log=stderr_log,
+            wrapper_log=wrapper_log,
+            result=result,
+            lifecycle_error=lifecycle_error,
+        )
     sys.stdout.write("0")
     return 0
 
@@ -352,8 +380,9 @@ def parse_launch_config(args: argparse.Namespace) -> LaunchConfig:
         output_format="stream-json" if args.stream else str(args.output_format),
         stream=bool(args.stream),
         raw_events=bool(args.raw_events),
-        startup_timeout=float(args.startup_timeout),
+        startup_warn_after=float(args.startup_warn_after),
         shutdown_timeout=float(args.shutdown_timeout),
+        mirror_prefix=None if args.no_mirror else str(args.mirror_prefix),
         allowed_tools=tuple(str(tool) for tool in args.allowed_tool),
         disallowed_tools=tuple(str(tool) for tool in args.disallowed_tool),
         add_dirs=tuple(str(directory) for directory in args.add_dir),
@@ -412,8 +441,9 @@ def run_claude(
             raw_events_log,
             wrapper_log,
             config.raw_events,
-            config.startup_timeout,
+            config.startup_warn_after,
             config.shutdown_timeout,
+            config.mirror_prefix,
         )
 
     try:
@@ -445,8 +475,9 @@ def run_streaming_claude(
     raw_events_log: Path,
     wrapper_log: Path,
     raw_events: bool,
-    startup_timeout: float,
+    startup_warn_after: float,
     shutdown_timeout: float,
+    mirror_prefix: str | None,
 ) -> int:
     """Run Claude Code while teeing child streams to logs and wrapper stderr."""
     try:
@@ -494,26 +525,25 @@ def run_streaming_claude(
         try:
             stdout_thread = Thread(
                 target=tee_stdout_stream,
-                args=(process.stdout, stdout_file, events_file, raw_events_file, stderr_lock, first_output),
+                args=(process.stdout, stdout_file, events_file, raw_events_file, stderr_lock, first_output, mirror_prefix),
                 daemon=True,
             )
             stderr_thread = Thread(
                 target=tee_stderr_stream,
-                args=(process.stderr, (stderr_file,), stderr_lock, first_output),
+                args=(process.stderr, (stderr_file,), stderr_lock, first_output, mirror_prefix),
                 daemon=True,
             )
             threads = (stdout_thread, stderr_thread)
             stdout_thread.start()
             stderr_thread.start()
             try:
-                enforce_startup_timeout(
+                emit_startup_warning_if_silent(
                     process=process,
                     first_output=first_output,
-                    startup_timeout=startup_timeout,
+                    startup_warn_after=startup_warn_after,
                     stderr_file=stderr_file,
                     stderr_lock=stderr_lock,
                     wrapper_log=wrapper_log,
-                    shutdown_timeout=shutdown_timeout,
                 )
                 return_code = process.wait()
                 if not join_stream_threads(threads, shutdown_timeout):
@@ -527,8 +557,11 @@ def run_streaming_claude(
                     if not join_stream_threads(threads, shutdown_timeout):
                         signal_process_group(process.pid, SIGKILL, wrapper_log)
                         if not join_stream_threads(threads, shutdown_timeout):
-                            raise CCBashError(
-                                f"stream readers did not finish after child exit; see {stdout_log} and {stderr_log}"
+                            emit_wrapper_diagnostic(
+                                "stream readers are still alive after cleanup; continuing to protocol validation\n",
+                                stderr_file,
+                                stderr_lock,
+                                wrapper_log,
                             )
             except Exception:
                 if process.poll() is None:
@@ -559,6 +592,7 @@ def tee_stdout_stream(
     raw_events_file: TextIO | None,
     stderr_lock: Lock,
     first_output: Event,
+    mirror_prefix: str | None,
 ) -> None:
     """Copy child stdout into lean event logs while avoiding raw JSON duplication."""
     for chunk in source:
@@ -575,9 +609,7 @@ def tee_stdout_stream(
             events_file.write(lean_event)
             events_file.flush()
             mirrored = lean_event
-        with stderr_lock:
-            sys.stderr.write(mirrored)
-            sys.stderr.flush()
+        write_mirrored_chunk(mirrored, mirror_prefix, stderr_lock)
 
 
 def tee_stderr_stream(
@@ -585,6 +617,7 @@ def tee_stderr_stream(
     log_files: Sequence[TextIO],
     stderr_lock: Lock,
     first_output: Event,
+    mirror_prefix: str | None,
 ) -> None:
     """Copy child stderr to logs and wrapper stderr."""
     for chunk in source:
@@ -592,9 +625,17 @@ def tee_stderr_stream(
         for log_file in log_files:
             log_file.write(chunk)
             log_file.flush()
-        with stderr_lock:
-            sys.stderr.write(chunk)
-            sys.stderr.flush()
+        write_mirrored_chunk(chunk, mirror_prefix, stderr_lock)
+
+
+def write_mirrored_chunk(chunk: str, mirror_prefix: str | None, stderr_lock: Lock) -> None:
+    """Write live mirrored child output with an attribution prefix."""
+    if mirror_prefix is None:
+        return
+    with stderr_lock:
+        for line in chunk.splitlines(keepends=True):
+            sys.stderr.write(f"{mirror_prefix}{line}")
+        sys.stderr.flush()
 
 
 def lean_event_line(raw_line: str) -> str | None:
@@ -644,35 +685,30 @@ def redacted_event_summary(value: object) -> dict[str, object]:
     return {"redacted": type(value).__name__}
 
 
-def enforce_startup_timeout(
+def emit_startup_warning_if_silent(
     *,
     process: subprocess.Popen[str],
     first_output: Event,
-    startup_timeout: float,
+    startup_warn_after: float,
     stderr_file: TextIO,
     stderr_lock: Lock,
     wrapper_log: Path,
-    shutdown_timeout: float,
 ) -> None:
-    """Terminate a stream worker that never emits its first line."""
-    if startup_timeout <= 0 or first_output.is_set():
+    """Warn when a stream worker has not emitted its first line yet."""
+    if startup_warn_after <= 0 or first_output.is_set():
         return
 
-    deadline = time.monotonic() + startup_timeout
+    deadline = time.monotonic() + startup_warn_after
     while process.poll() is None and not first_output.is_set():
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             process_tree = format_process_tree(process.pid)
             message = (
-                f"no child stdout/stderr after {startup_timeout:g}s in stream mode; "
-                f"terminating process group {process.pid}\n{process_tree}\n"
+                f"no child stdout/stderr after {startup_warn_after:g}s in stream mode; "
+                f"continuing without terminating process group {process.pid}\n{process_tree}\n"
             )
             emit_wrapper_diagnostic(message, stderr_file, stderr_lock, wrapper_log)
-            terminate_process_group(process, shutdown_timeout, wrapper_log)
-            raise CCBashError(
-                f"Claude Code produced no stdout/stderr within {startup_timeout:g}s in stream mode; "
-                "see wrapper/stderr logs"
-            )
+            return
         first_output.wait(min(0.25, remaining))
 
 
@@ -738,8 +774,9 @@ def write_launch_metadata(
         f"raw_events: {config.raw_events}",
         f"model: {config.model}",
         f"output_format: {config.output_format}",
-        f"startup_timeout_seconds: {config.startup_timeout:g}",
+        f"startup_warn_after_seconds: {config.startup_warn_after:g}",
         f"shutdown_timeout_seconds: {config.shutdown_timeout:g}",
+        f"mirror_prefix: {config.mirror_prefix or ''}",
         f"prompt_bytes: {len(prompt.encode('utf-8'))}",
         f"append_system_prompt_bytes: {append_prompt_bytes}",
         f"skill_count: {skill_count}",
@@ -1233,13 +1270,39 @@ def resolve_project_path(cwd: Path, value: str) -> Path:
     return path.resolve(strict=False)
 
 
-def clear_previous_signal(signal_abs: Path) -> None:
-    """Remove any prior signal so success must come from this launch."""
-    if not signal_abs.exists():
+def clear_previous_artifacts(*, report_abs: Path, signal_abs: Path) -> None:
+    """Remove prior protocol artifacts so success must come from this launch."""
+    clear_previous_artifact(report_abs, "report")
+    clear_previous_artifact(signal_abs, "signal")
+
+
+def clear_previous_artifact(path: Path, artifact_name: str) -> None:
+    """Remove one prior protocol artifact if it is a regular file."""
+    if not path.exists():
         return
-    if not signal_abs.is_file():
-        raise CCBashError(f"declared signal path exists and is not a file: {signal_abs}")
-    signal_abs.unlink()
+    if not path.is_file():
+        raise CCBashError(f"declared {artifact_name} path exists and is not a file: {path}")
+    path.unlink()
+
+
+def record_protocol_success_diagnostic(
+    *,
+    stderr_log: Path,
+    wrapper_log: Path,
+    result: int | None,
+    lifecycle_error: CCBashError | None,
+) -> None:
+    """Record non-fatal child issues when protocol validation succeeded."""
+    details: list[str] = []
+    if result is not None and result != 0:
+        details.append(f"child_exit_code={result}")
+    if lifecycle_error is not None:
+        details.append(f"lifecycle_error={lifecycle_error}")
+    message = f"cc-bash: protocol valid; treating child issue as success ({'; '.join(details)})\n"
+    append_wrapper_log(wrapper_log, message)
+    stderr_log.parent.mkdir(parents=True, exist_ok=True)
+    with stderr_log.open("a", encoding="utf-8") as log_file:
+        log_file.write(message)
 
 
 def validate_protocol_outputs(

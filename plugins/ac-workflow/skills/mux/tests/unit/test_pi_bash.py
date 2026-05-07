@@ -69,6 +69,8 @@ def main() -> int:
                 flush=True,
             )
         print(json.dumps({"type": "tool_execution_start", "tool": "Read"}), flush=True)
+        if os.environ.get("FAKE_PI_PRETOOL_STDERR", "0") == "1":
+            print("PreToolUse:Bash says:", file=sys.stderr, flush=True)
         print("fake stream stderr", file=sys.stderr, flush=True)
     else:
         print("fake stdout")
@@ -112,6 +114,8 @@ def main() -> int:
             "status: success\n"
             "created_at: 2026-05-05T00:00:00+00:00\n"
         )
+    if os.environ.get("FAKE_PI_EXIT_AFTER_ARTIFACTS", "0") != "0":
+        return int(os.environ["FAKE_PI_EXIT_AFTER_ARTIFACTS"])
     return 0
 
 
@@ -261,7 +265,7 @@ def test_pi_bash_stream_tees_events_to_logs_and_wrapper_stderr(tmp_path: Path) -
     assert result.stdout == "0"
     assert '"type":"agent_start"' in result.stderr
     assert '"type":"tool_execution_start"' in result.stderr
-    assert "fake stream stderr" in result.stderr
+    assert "pi> fake stream stderr" in result.stderr
 
     stdout_log = log_path(workspace, "stdout.log")
     stderr_log = log_path(workspace, "stderr.log")
@@ -275,6 +279,45 @@ def test_pi_bash_stream_tees_events_to_logs_and_wrapper_stderr(tmp_path: Path) -
 
     argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
     assert argv[:5] == ["--mode", "json", "--no-extensions", "--tools", "read,bash,edit,write,grep,find,ls"]
+
+
+def test_pi_bash_stream_prefixes_child_hook_stderr(tmp_path: Path) -> None:
+    """Mirrored child hook output is attributable to the inner pi worker."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+
+    result = run_pi_bash(
+        workspace=workspace,
+        fake_pi=fake_pi,
+        tmp_path=tmp_path,
+        extra_args=["--stream"],
+        env_overrides={"FAKE_PI_PRETOOL_STDERR": "1"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "pi> PreToolUse:Bash says:" in result.stderr
+    stderr_text = log_path(workspace, "stderr.log").read_text()
+    assert "PreToolUse:Bash says:" in stderr_text
+    assert "pi> PreToolUse:Bash says:" not in stderr_text
+
+
+def test_pi_bash_stream_no_mirror_preserves_logs(tmp_path: Path) -> None:
+    """No-mirror mode suppresses live child output while keeping logs and events."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+
+    result = run_pi_bash(
+        workspace=workspace,
+        fake_pi=fake_pi,
+        tmp_path=tmp_path,
+        extra_args=["--stream", "--no-mirror"],
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert '"type":"agent_start"' not in result.stderr
+    assert "fake stream stderr" not in result.stderr
+    assert '"type":"agent_start"' in log_path(workspace, "events.jsonl").read_text()
+    assert "fake stream stderr\n" in log_path(workspace, "stderr.log").read_text()
 
 
 def test_pi_bash_stream_sanitizes_events_with_raw_opt_in(tmp_path: Path) -> None:
@@ -384,8 +427,8 @@ def test_pi_bash_stream_cleans_up_inherited_pipe_descendants(tmp_path: Path) -> 
     assert "exit_code: 0" in wrapper_text
 
 
-def test_pi_bash_stream_fails_fast_when_child_never_emits_first_event(tmp_path: Path) -> None:
-    """Streaming workers get a startup watchdog instead of silent empty events logs."""
+def test_pi_bash_stream_warns_without_killing_when_child_delays_first_event(tmp_path: Path) -> None:
+    """Streaming workers warn on startup silence without killing a healthy child."""
     workspace = create_workspace(tmp_path)
     fake_pi = write_fake_pi(tmp_path)
 
@@ -393,22 +436,72 @@ def test_pi_bash_stream_fails_fast_when_child_never_emits_first_event(tmp_path: 
         workspace=workspace,
         fake_pi=fake_pi,
         tmp_path=tmp_path,
-        extra_args=["--stream", "--startup-timeout", "0.1", "--shutdown-timeout", "0.1"],
-        env_overrides={"FAKE_PI_SLEEP_BEFORE_OUTPUT": "5"},
+        extra_args=["--stream", "--startup-warn-after", "0.1", "--shutdown-timeout", "0.1"],
+        env_overrides={"FAKE_PI_SLEEP_BEFORE_OUTPUT": "0.2"},
     )
 
-    assert result.returncode != 0
-    assert result.stdout == ""
-    assert "pi produced no stdout/stderr within 0.1s in stream mode" in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "0"
+    assert "no child stdout/stderr after 0.1s in stream mode" in result.stderr
+    assert "continuing without terminating process group" in result.stderr
     assert "process_tree:" in result.stderr
-
-    assert log_path(workspace, "events.jsonl").read_text() == ""
-    assert "no child stdout/stderr after 0.1s" in log_path(workspace, "stderr.log").read_text()
+    assert '"type":"agent_start"' in log_path(workspace, "events.jsonl").read_text()
     wrapper_text = log_path(workspace, "wrapper.log").read_text()
     assert "child_pid:" in wrapper_text
     assert "command:" in wrapper_text
     assert "<redacted>" in wrapper_text
     assert "Write the report and signal files." not in wrapper_text
+
+
+def test_pi_bash_nonzero_child_with_valid_protocol_succeeds(tmp_path: Path) -> None:
+    """A valid report and success signal are authoritative over child exit code."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+
+    result = run_pi_bash(
+        workspace=workspace,
+        fake_pi=fake_pi,
+        tmp_path=tmp_path,
+        env_overrides={"FAKE_PI_EXIT_AFTER_ARTIFACTS": "3"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "0"
+    assert "protocol valid; treating child issue as success" in log_path(workspace, "stderr.log").read_text()
+    assert "child_exit_code=3" in log_path(workspace, "wrapper.log").read_text()
+
+
+def test_pi_bash_clears_stale_protocol_artifacts_before_launch(tmp_path: Path) -> None:
+    """Stale report and signal files cannot satisfy a later launch."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+    report_path = workspace / "tmp" / "mux" / "session" / "build" / "agent-1.md"
+    signal_path = workspace / "tmp" / "mux" / "session" / ".signals" / "agent-1.done"
+    report_path.parent.mkdir(parents=True)
+    signal_path.parent.mkdir(parents=True)
+    report_path.write_text(
+        "# Worker Report\n\n"
+        "## Table of Contents\n"
+        "- Executive Summary\n\n"
+        "## Executive Summary\n"
+        "Stale.\n\n"
+        "### Next Steps\n"
+        "- Continue.\n"
+    )
+    signal_path.write_text("path: tmp/mux/session/build/agent-1.md\nstatus: success\n")
+
+    result = run_pi_bash(
+        workspace=workspace,
+        fake_pi=fake_pi,
+        tmp_path=tmp_path,
+        env_overrides={"FAKE_PI_WRITE_ARTIFACTS": "0"},
+    )
+
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "missing report file" in result.stderr
+    assert not report_path.exists()
+    assert not signal_path.exists()
 
 
 GENERIC_FAILURE_CASES = [

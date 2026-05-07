@@ -23,7 +23,7 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch \
   --stream
 ```
 
-Operational default: include `--stream` for MUX launches so the coordinator can watch worker turn/tool events in the background command output. Omit it only for low-noise or legacy automation. `pi-bash` disables the stream first-output timeout by default because `pi --mode json` can be legitimately silent before its first model/tool event; use `--startup-timeout N` only as an explicit diagnostic fail-fast option.
+Operational default: include `--stream` for MUX launches so the coordinator can watch worker turn/tool events in the background command output. Omit it only for low-noise automation. Startup silence is warning-only because `pi --mode json` can be legitimately silent before its first model/tool event; use `--startup-warn-after N` to tune or disable that diagnostic.
 
 The wrapper is a foreground supervisor. If the worker should run in the background, use the Bash tool's background mode. Do not add `&`, shell pipelines, redirection, or polling loops to the command string.
 
@@ -40,12 +40,14 @@ The wrapper is a foreground supervisor. If the worker should run in the backgrou
 - with `--stream`, writes sanitized child stdout JSONL to `.events.jsonl`
 - with `--stream`, keeps `.stdout.log` lean instead of duplicating JSON events
 - with `--stream --raw-events`, additionally writes unsanitized child stdout JSONL to `.raw-events.jsonl`
-- with `--stream`, mirrors sanitized child stdout events and raw child stderr to wrapper stderr for live viewing
-- with explicit `--startup-timeout`, terminates the child process group if no first stdout/stderr line arrives before the timeout
+- with `--stream`, mirrors sanitized child stdout events and raw child stderr to wrapper stderr with a `pi> ` prefix for live viewing
+- with `--no-mirror`, suppresses live child output while keeping logs and events
+- with `--startup-warn-after`, warns if no first stdout/stderr line arrives before the threshold without killing the child
 - supervises stream and non-stream children with heartbeat diagnostics, optional runtime/idle timeouts, and sanitized process/session snapshots
 - defaults to `--no-extensions` with a built-in tool allowlist unless explicitly overridden
-- bounds stream-reader shutdown after child exit and cleans up process-group descendants before failing closed
-- requires the child process to exit `0`
+- bounds stream-reader shutdown after child exit and logs cleanup warnings before protocol validation
+- removes stale declared report and signal files before launch
+- treats the file protocol as authoritative, recording non-zero child exits as diagnostics when protocol validation succeeds
 - requires the declared report file to exist
 - requires the declared signal file to exist
 - requires signal `status: success`
@@ -82,7 +84,7 @@ After completion, or after an explicit `deactivate.py` for diagnostics, inspect:
 <SESSION_DIR>/logs/<agent-id>.latest.json
 ```
 
-Use `.events.jsonl` for lean pi turn/tool event history, `.stdout.log` for non-JSON stdout plus stream-mode notes, `.stderr.log` for child stderr plus wrapper diagnostics, `.wrapper.log` for sanitized argv, child PID, heartbeat/snapshot, timeout, and exit diagnostics, and `.latest.json` to find the newest attempt. Use `--raw-events` only for explicit forensic debugging because it can be large and may contain provider internals.
+Use `.events.jsonl` for lean pi turn/tool event history, `.stdout.log` for non-JSON stdout plus stream-mode notes, `.stderr.log` for child stderr plus wrapper diagnostics, `.wrapper.log` for sanitized argv, child PID, heartbeat/snapshot, warning, and exit diagnostics, and `.latest.json` to find the newest attempt. Use `--raw-events` only for explicit forensic debugging because it can be large and may contain provider internals.
 
 ## Skill preloading
 

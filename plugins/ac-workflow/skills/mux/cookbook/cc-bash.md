@@ -27,7 +27,7 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash.py launch \
   --stream
 ```
 
-Operational default: include `--stream` for MUX launches so the coordinator can watch worker turn/tool events in the background command output. Omit it only for low-noise or legacy automation.
+Operational default: include `--stream` for MUX launches so the coordinator can watch worker turn/tool events in the background command output. Omit it only for low-noise automation. Startup silence is warning-only; use `--startup-warn-after N` to tune or disable that diagnostic.
 
 The wrapper is a foreground supervisor. If the worker should run in the background, use the Bash tool's background mode. Do not add `&`, shell pipelines, redirection, or polling loops to the command string.
 
@@ -53,11 +53,12 @@ The concrete fallback may include `npx -y` to avoid an interactive package-insta
 - with `--stream`, writes sanitized child stdout JSONL to `logs/<agent-id>.events.jsonl`
 - with `--stream`, keeps `logs/<agent-id>.stdout.log` lean instead of duplicating JSON events
 - with `--stream --raw-events`, additionally writes unsanitized child stdout JSONL to `logs/<agent-id>.raw-events.jsonl`
-- with `--stream`, mirrors sanitized child stdout events and raw child stderr to wrapper stderr for live viewing
-- with `--stream`, terminates the child process group if no first stdout/stderr line arrives before `--startup-timeout` seconds
-- with `--stream`, bounds stream-reader shutdown after child exit and cleans up process-group descendants before failing closed
-- removes any stale declared signal before launch
-- requires the child process to exit `0`
+- with `--stream`, mirrors sanitized child stdout events and raw child stderr to wrapper stderr with a `cc> ` prefix for live viewing
+- with `--no-mirror`, suppresses live child output while keeping logs and events
+- with `--startup-warn-after`, warns if no first stdout/stderr line arrives before the threshold without killing the child
+- with `--stream`, bounds stream-reader shutdown after child exit and logs cleanup warnings before protocol validation
+- removes stale declared report and signal files before launch
+- treats the file protocol as authoritative, recording non-zero child exits as diagnostics when protocol validation succeeds
 - requires the declared report file to exist
 - requires the declared signal file to exist
 - requires signal `status: success`
@@ -93,7 +94,7 @@ After completion, or after an explicit `deactivate.py` for diagnostics, inspect:
 <SESSION_DIR>/logs/<agent-id>.raw-events.jsonl  # only with --raw-events
 ```
 
-Use `.events.jsonl` for lean Claude Code stream events, `.stdout.log` for non-JSON stdout plus stream-mode notes, `.stderr.log` for child stderr, and `.wrapper.log` for sanitized argv, child PID, timeout, and exit diagnostics. Use `--raw-events` only for explicit forensic debugging because it can be large and may contain provider internals.
+Use `.events.jsonl` for lean Claude Code stream events, `.stdout.log` for non-JSON stdout plus stream-mode notes, `.stderr.log` for child stderr and wrapper diagnostics, and `.wrapper.log` for sanitized argv, child PID, warning, and exit diagnostics. Use `--raw-events` only for explicit forensic debugging because it can be large and may contain provider internals.
 
 ## Skill preloading
 
