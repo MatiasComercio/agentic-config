@@ -13,18 +13,22 @@ export type BridgeEventType =
 	| "closeout"
 	| "exited"
 	| "shutdown_request";
+export type PendingTerminalReportState = "terminal_report_received" | "terminal_report_exit_timeout";
 export type SettledTerminalState =
 	| "settled_completion"
 	| "settled_failure"
 	| "settled_blocked"
 	| "settled_waiting_on_parent"
 	| "protocol_violation";
-export type BridgeSettlementState = "running" | SettledTerminalState;
+export type BridgeSettlementState = "running" | PendingTerminalReportState | SettledTerminalState;
+
+export const DEFAULT_TERMINAL_REPORT_EXIT_TIMEOUT_MS = 15_000;
 
 export interface BridgeSettlementEvent {
 	eventId: string;
 	direction: BridgeEventDirection;
 	type: BridgeEventType;
+	timestamp?: string;
 	requiresResponse?: boolean;
 }
 
@@ -36,6 +40,11 @@ export interface BridgeSettlementEvaluation<TEvent extends BridgeSettlementEvent
 	settledState: BridgeSettlementState;
 	terminalEvent?: TEvent;
 	protocolViolationReason?: string;
+}
+
+export interface BridgeSettlementEvaluationOptions {
+	nowMs?: number;
+	terminalExitTimeoutMs?: number;
 }
 
 function hasExitEvent<TEvent extends BridgeSettlementEvent>(events: TEvent[]): boolean {
@@ -66,16 +75,37 @@ function mapTerminalEvent(event: BridgeSettlementEvent): SettledTerminalState {
 }
 
 export function isSettledTerminalState(state: BridgeSettlementState | undefined): state is SettledTerminalState {
-	return Boolean(state && state !== "running");
+	return state === "settled_completion"
+		|| state === "settled_failure"
+		|| state === "settled_blocked"
+		|| state === "settled_waiting_on_parent"
+		|| state === "protocol_violation";
+}
+
+export function isPendingTerminalReportState(state: BridgeSettlementState | undefined): state is PendingTerminalReportState {
+	return state === "terminal_report_received" || state === "terminal_report_exit_timeout";
+}
+
+function pendingTerminalState<TEvent extends BridgeSettlementEvent>(
+	terminal: TEvent,
+	options: BridgeSettlementEvaluationOptions,
+): BridgeSettlementEvaluation<TEvent> {
+	const terminalMs = terminal.timestamp ? Date.parse(terminal.timestamp) : Number.NaN;
+	if (
+		options.terminalExitTimeoutMs !== undefined
+		&& options.nowMs !== undefined
+		&& Number.isFinite(terminalMs)
+		&& options.nowMs - terminalMs >= options.terminalExitTimeoutMs
+	) {
+		return { settledState: "terminal_report_exit_timeout", terminalEvent: terminal };
+	}
+	return { settledState: "terminal_report_received", terminalEvent: terminal };
 }
 
 export function evaluateBridgeSettlement<TEvent extends BridgeSettlementEvent>(
 	events: TEvent[],
+	options: BridgeSettlementEvaluationOptions = {},
 ): BridgeSettlementEvaluation<TEvent> {
-	if (!hasExitEvent(events)) {
-		return { settledState: "running" };
-	}
-
 	const childReports = events.filter((event) => event.direction === "child_to_parent");
 	const closeouts = childReports.filter((event) => event.type === "closeout");
 	if (closeouts.length > 1) {
@@ -94,6 +124,7 @@ export function evaluateBridgeSettlement<TEvent extends BridgeSettlementEvent>(
 				protocolViolationReason: `Post-closeout child report detected: ${later.type} (${later.eventId})`,
 			};
 		}
+		if (!hasExitEvent(events)) return pendingTerminalState(closeout, options);
 		return {
 			settledState: "settled_completion",
 			terminalEvent: closeout,
@@ -102,11 +133,13 @@ export function evaluateBridgeSettlement<TEvent extends BridgeSettlementEvent>(
 
 	const terminal = [...childReports].reverse().find((event) => isTerminalDeclaration(event));
 	if (!terminal) {
+		if (!hasExitEvent(events)) return { settledState: "running" };
 		return {
 			settledState: "protocol_violation",
 			protocolViolationReason: "Child exited without a valid terminal declaration.",
 		};
 	}
+	if (!hasExitEvent(events)) return pendingTerminalState(terminal, options);
 	return {
 		settledState: mapTerminalEvent(terminal),
 		terminalEvent: terminal,

@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import { appendBridgeEvent, readBridgeEvents, readBridgeLaunch, writeBridgeEventSignal, writeBridgeReport } from "./bridge.ts";
+import { appendBridgeEvent, appendBridgeEventIfMissing, readBridgeEvents, readBridgeLaunch, writeBridgeEventSignal, writeBridgeReport } from "./bridge.ts";
 
 function hasTerminalChildReport(events: Awaited<ReturnType<typeof readBridgeEvents>>): boolean {
 	return events.some(
@@ -7,10 +7,6 @@ function hasTerminalChildReport(events: Awaited<ReturnType<typeof readBridgeEven
 			event.direction === "child_to_parent" &&
 			(event.type === "closeout" || event.type === "failure" || event.type === "blocker" || event.type === "question"),
 	);
-}
-
-function hasExitedEvent(events: Awaited<ReturnType<typeof readBridgeEvents>>): boolean {
-	return events.some((event) => event.direction === "system" && event.type === "exited");
 }
 
 async function readLogTail(logPath: string | undefined, maxChars = 4000): Promise<string | undefined> {
@@ -26,16 +22,18 @@ async function readLogTail(logPath: string | undefined, maxChars = 4000): Promis
 
 async function appendExitedEventIfMissing(bridgeDir: string): Promise<void> {
 	const launch = await readBridgeLaunch(bridgeDir);
-	const events = await readBridgeEvents(bridgeDir);
-	if (hasExitedEvent(events)) return;
-	const exitedEvent = await appendBridgeEvent(bridgeDir, {
-		launchId: launch.launchId,
-		direction: "system",
-		type: "exited",
-		from: { agentId: launch.agentId, sessionName: launch.sessionName },
-		summary: `${launch.agentId} exited before managed terminal settlement was finalized`,
-	});
-	await writeBridgeEventSignal(bridgeDir, exitedEvent, true);
+	const result = await appendBridgeEventIfMissing(
+		bridgeDir,
+		{
+			launchId: launch.launchId,
+			direction: "system",
+			type: "exited",
+			from: { agentId: launch.agentId, sessionName: launch.sessionName },
+			summary: `${launch.agentId} exited before managed terminal settlement was finalized`,
+		},
+		(event) => event.direction === "system" && event.type === "exited",
+	);
+	if (result.appended) await writeBridgeEventSignal(bridgeDir, result.event, true);
 }
 
 export async function reportManagedLauncherExit(params: {

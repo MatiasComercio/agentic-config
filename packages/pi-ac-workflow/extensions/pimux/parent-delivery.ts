@@ -1,6 +1,6 @@
 import type { BridgeLaunchFile } from "./bridge.ts";
 import type { AgentActivitySnapshot } from "./registry.ts";
-import type { SettledTerminalState } from "./settlement.ts";
+import type { BridgeSettlementState, SettledTerminalState } from "./settlement.ts";
 
 export interface QueuedParentDelivery {
 	key: string;
@@ -16,7 +16,7 @@ export interface QueuedParentDelivery {
 
 export interface TerminalNotificationState {
 	terminalNotificationDeliveredAt?: string;
-	terminalState?: SettledTerminalState;
+	terminalState?: BridgeSettlementState;
 	terminalEventId?: string;
 	protocolViolationReason?: string;
 }

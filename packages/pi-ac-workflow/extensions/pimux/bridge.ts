@@ -23,7 +23,8 @@ import {
 	type NotificationMode,
 	type ThinkingEffort,
 } from "./paths.ts";
-import type { BridgeEventDirection, BridgeEventType, SettledTerminalState } from "./settlement.ts";
+import { isSettledTerminalState } from "./settlement.ts";
+import type { BridgeEventDirection, BridgeEventType, BridgeSettlementState } from "./settlement.ts";
 
 export type ReportParentKind = "question" | "blocker" | "progress" | "failure" | "closeout";
 
@@ -77,7 +78,12 @@ export interface BridgeParentState {
 	terminalEventId?: string;
 	terminalFinalizedAt?: string;
 	terminalObservedAt?: string;
-	terminalState?: SettledTerminalState;
+	terminalState?: BridgeSettlementState;
+	terminalReportEventId?: string;
+	terminalReportKind?: Exclude<ReportParentKind, "progress">;
+	terminalReportObservedAt?: string;
+	terminalReportExitTimedOutAt?: string;
+	terminalReportExitTimeoutNotifiedAt?: string;
 	terminalNotificationQueuedAt?: string;
 	terminalNotificationDeliveredAt?: string;
 	terminalNotificationBatchId?: string;
@@ -150,6 +156,13 @@ function preferLatestIso(left: string | undefined, right: string | undefined): s
 	return left >= right ? left : right;
 }
 
+function preferTerminalState(current: BridgeSettlementState | undefined, next: BridgeSettlementState | undefined): BridgeSettlementState | undefined {
+	if (!next) return current;
+	if (!current) return next;
+	if (isSettledTerminalState(current) && !isSettledTerminalState(next)) return current;
+	return next;
+}
+
 function mergeBridgeParentState(current: BridgeParentState, next: BridgeParentState): BridgeParentState {
 	return {
 		...current,
@@ -158,7 +171,12 @@ function mergeBridgeParentState(current: BridgeParentState, next: BridgeParentSt
 		terminalEventId: next.terminalEventId ?? current.terminalEventId,
 		terminalFinalizedAt: preferLatestIso(current.terminalFinalizedAt, next.terminalFinalizedAt),
 		terminalObservedAt: preferLatestIso(current.terminalObservedAt, next.terminalObservedAt),
-		terminalState: next.terminalState ?? current.terminalState,
+		terminalState: preferTerminalState(current.terminalState, next.terminalState),
+		terminalReportEventId: next.terminalReportEventId ?? current.terminalReportEventId,
+		terminalReportKind: next.terminalReportKind ?? current.terminalReportKind,
+		terminalReportObservedAt: preferLatestIso(current.terminalReportObservedAt, next.terminalReportObservedAt),
+		terminalReportExitTimedOutAt: preferLatestIso(current.terminalReportExitTimedOutAt, next.terminalReportExitTimedOutAt),
+		terminalReportExitTimeoutNotifiedAt: preferLatestIso(current.terminalReportExitTimeoutNotifiedAt, next.terminalReportExitTimeoutNotifiedAt),
 		terminalNotificationQueuedAt: preferLatestIso(current.terminalNotificationQueuedAt, next.terminalNotificationQueuedAt),
 		terminalNotificationDeliveredAt: preferLatestIso(current.terminalNotificationDeliveredAt, next.terminalNotificationDeliveredAt),
 		terminalNotificationBatchId: next.terminalNotificationBatchId ?? current.terminalNotificationBatchId,
@@ -280,6 +298,26 @@ export async function appendBridgeEvent(
 		await appendJsonLine(eventsPath, fullEvent);
 	});
 	return fullEvent;
+}
+
+export async function appendBridgeEventIfMissing(
+	bridgeDir: string,
+	event: Omit<BridgeEvent, "eventId" | "timestamp">,
+	predicate: (event: BridgeEvent) => boolean,
+): Promise<{ events: BridgeEvent[]; event: BridgeEvent; appended: boolean }> {
+	const eventsPath = getBridgeEventsPath(bridgeDir);
+	return await withQueuedFileOperation(eventsPath, async () => {
+		const events = await readBridgeEvents(bridgeDir);
+		const existing = events.find(predicate);
+		if (existing) return { events, event: existing, appended: false };
+		const fullEvent: BridgeEvent = {
+			eventId: randomUUID(),
+			timestamp: nowIso(),
+			...event,
+		};
+		await appendJsonLine(eventsPath, fullEvent);
+		return { events: [...events, fullEvent], event: fullEvent, appended: true };
+	});
 }
 
 export async function writeSignalFile(

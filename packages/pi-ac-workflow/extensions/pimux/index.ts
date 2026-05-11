@@ -5,6 +5,7 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import {
 	appendBridgeEvent,
+	appendBridgeEventIfMissing,
 	buildBridgeSessionEntry,
 	buildChildProtocol,
 	createBridgeLaunch,
@@ -119,7 +120,9 @@ import {
 	type ThinkingEffort,
 } from "./paths.ts";
 import {
+	DEFAULT_TERMINAL_REPORT_EXIT_TIMEOUT_MS,
 	evaluateBridgeSettlement,
+	isSettledTerminalState,
 	isTerminalChildReportEvent,
 	shouldDeliverBridgeEventToParent,
 	shouldTriggerTurnForEvent,
@@ -715,20 +718,56 @@ async function ensureExitedBridgeEvent(params: {
 }): Promise<BridgeEvent[]> {
 	if (!params.bridgeDir || !params.launchId) return [];
 
-	let events = await readBridgeEvents(params.bridgeDir).catch(() => []);
-	const hasExitedEvent = events.some((event) => event.direction === "system" && event.type === "exited");
-	if (!hasExitedEvent) {
-		const exitedEvent = await appendBridgeEvent(params.bridgeDir, {
+	const result = await appendBridgeEventIfMissing(
+		params.bridgeDir,
+		{
 			launchId: params.launchId,
 			direction: "system",
 			type: "exited",
 			from: { agentId: params.agentId, sessionName: params.sessionName },
 			summary: params.exitSummary,
-		});
-		await writeBridgeEventSignal(params.bridgeDir, exitedEvent, true);
-		events = [...events, exitedEvent];
-	}
-	return events;
+		},
+		(event) => event.direction === "system" && event.type === "exited",
+	);
+	if (result.appended) await writeBridgeEventSignal(params.bridgeDir, result.event, true);
+	return result.events;
+}
+
+function terminalReportKind(event: BridgeEvent): Exclude<ReportParentKind, "progress"> | undefined {
+	if (!isTerminalChildReportEvent(event)) return undefined;
+	return event.type;
+}
+
+async function recordTerminalReportReceived(bridgeDir: string, event: BridgeEvent): Promise<void> {
+	const kind = terminalReportKind(event);
+	if (!kind) return;
+	await writeBridgeParentState(bridgeDir, {
+		deliveredEventIds: [],
+		terminalState: "terminal_report_received",
+		terminalReportEventId: event.eventId,
+		terminalReportKind: kind,
+		terminalReportObservedAt: event.timestamp,
+	});
+}
+
+async function recordTerminalReportExitTimeout(bridgeDir: string, event: BridgeEvent): Promise<void> {
+	const kind = terminalReportKind(event);
+	if (!kind) return;
+	await writeBridgeParentState(bridgeDir, {
+		deliveredEventIds: [],
+		terminalState: "terminal_report_exit_timeout",
+		terminalReportEventId: event.eventId,
+		terminalReportKind: kind,
+		terminalReportObservedAt: event.timestamp,
+		terminalReportExitTimedOutAt: nowIso(),
+	});
+}
+
+function scheduleCurrentChildExitAfterTerminalReport(): void {
+	const timer = setTimeout(() => {
+		process.exit(0);
+	}, TERMINAL_REPORT_SELF_EXIT_DELAY_MS);
+	timer.unref?.();
 }
 
 async function finalizeBridgeAfterForcedTermination(record: ManagedAgentRecord, exitSummary?: string): Promise<void> {
@@ -740,7 +779,7 @@ async function finalizeBridgeAfterForcedTermination(record: ManagedAgentRecord, 
 		exitSummary: exitSummary ?? `${record.agentId} terminated by parent`,
 	});
 	const settlement = evaluateBridgeSettlement(events);
-	if (settlement.settledState === "running" || !record.bridgeDir) return;
+	if (!isSettledTerminalState(settlement.settledState) || !record.bridgeDir) return;
 
 	const parentState = await readBridgeParentState(record.bridgeDir).catch(() => ({ deliveredEventIds: [] }));
 	parentState.terminalState = settlement.settledState;
@@ -820,12 +859,21 @@ async function finalizeManagedAgentAfterTerminalReport(
 	launch: Pick<BridgeLaunchFile, "agentId" | "sessionName" | "bridgeDir" | "launchId">,
 	ctx: ExtensionContext,
 ): Promise<BridgeEvent[]> {
+	const existingEvents = await readBridgeEvents(launch.bridgeDir).catch(() => []);
+	if (!existingEvents.some((event) => event.direction === "system" && event.type === "exited")) {
+		if (await tmuxHasSession(launch.sessionName).catch(() => false)) {
+			await killTmuxSession(launch.sessionName);
+		}
+		if (await tmuxHasSession(launch.sessionName).catch(() => false)) {
+			const terminalEvent = [...existingEvents].reverse().find(isTerminalChildReportEvent);
+			if (terminalEvent) await recordTerminalReportExitTimeout(launch.bridgeDir, terminalEvent);
+			return existingEvents;
+		}
+	}
+
 	const stateRoot = getStateRoot(ctx.cwd);
 	const registry = await readRegistry(stateRoot);
 	const record = registry.agents.find((agent) => agent.agentId === launch.agentId || agent.sessionName === launch.sessionName);
-	if (await tmuxHasSession(launch.sessionName).catch(() => false)) {
-		await killTmuxSession(launch.sessionName);
-	}
 	if (record) {
 		const exitedAt = nowIso();
 		record.status = "exited";
@@ -950,6 +998,10 @@ async function reportParent(
 		reportPath,
 	});
 	event.signalPath = await writeBridgeEventSignal(currentEnv.bridgeDir, event, request.kind !== "failure");
+	if (isTerminalChildReportEvent(event)) {
+		await recordTerminalReportReceived(currentEnv.bridgeDir, event);
+		scheduleCurrentChildExitAfterTerminalReport();
+	}
 	return { bridgeDir: currentEnv.bridgeDir, event };
 }
 
@@ -1161,6 +1213,8 @@ const CONTROL_PLANE_ACTIVE_TOOLS = ["pimux", "AskUserQuestion", "say"];
 const NO_POLLING_SPAWN_ECHO = "NO-POLL: do not poll pimux or use Bash sleep/wait loops; wait for delivered child activity.";
 const PARENT_DELIVERY_DEBOUNCE_MS = 75;
 const BACKGROUND_MONITOR_INTERVAL_MS = 30_000;
+const TERMINAL_REPORT_EXIT_TIMEOUT_MS = DEFAULT_TERMINAL_REPORT_EXIT_TIMEOUT_MS;
+const TERMINAL_REPORT_SELF_EXIT_DELAY_MS = 750;
 
 function logBackgroundError(error: unknown): void {
 	console.error(error instanceof Error ? error.stack ?? error.message : String(error));
@@ -1407,6 +1461,54 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 		ctx.ui.setWidget(EXTENSION_NAME, dashboardLines(statuses));
 	};
 
+	const enqueueTerminalReportExitTimeout = async (
+		bridgeDir: string,
+		launch: BridgeLaunchFile,
+		event: BridgeEvent,
+		ctx: ExtensionContext,
+	): Promise<void> => {
+		const parentState = await readBridgeParentState(bridgeDir).catch(() => ({ deliveredEventIds: [] }));
+		if (parentState.terminalReportExitTimeoutNotifiedAt) return;
+		const timedOutAt = parentState.terminalReportExitTimedOutAt ?? nowIso();
+		await writeBridgeParentState(bridgeDir, {
+			deliveredEventIds: [],
+			terminalState: "terminal_report_exit_timeout",
+			terminalReportEventId: event.eventId,
+			terminalReportKind: terminalReportKind(event),
+			terminalReportObservedAt: event.timestamp,
+			terminalReportExitTimedOutAt: timedOutAt,
+			terminalReportExitTimeoutNotifiedAt: timedOutAt,
+		});
+		const content = [
+			"# pimux terminal report exit timeout",
+			"",
+			`${launch.agentId} emitted terminal report ${event.type} but the managed tmux session did not produce exit evidence before timeout.`,
+			"",
+			"Deterministic state:",
+			`- agentId: ${launch.agentId}`,
+			`- sessionName: ${launch.sessionName}`,
+			`- bridgeSettlementState: terminal_report_exit_timeout`,
+			`- terminalEventId: ${event.eventId}`,
+			`- terminalReportKind: ${event.type}`,
+			`- terminalReportObservedAt: ${event.timestamp}`,
+			`- terminalReportExitTimedOutAt: ${timedOutAt}`,
+			"",
+			"Recommended recovery: inspect with pimux status/activity/capture, then use pimux kill if the child is still live.",
+		].join("\n");
+		enqueueParentDelivery(
+			{
+				key: `terminal-timeout:${bridgeDir}:${event.eventId}`,
+				bridgeDir,
+				launch,
+				content,
+				triggerTurn: true,
+				eventIds: [],
+				createdAt: timedOutAt,
+			},
+			ctx,
+		);
+	};
+
 	const processBridgeDeliveriesOnce = async (bridgeDir: string, sessionKey: string, ctx: ExtensionContext) => {
 		const launch = await readBridgeLaunch(bridgeDir);
 		if (launch.parentSessionKey !== sessionKey) return;
@@ -1424,6 +1526,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 			if (!terminalReport && delivered.has(event.eventId)) continue;
 			if (terminalReport) {
 				terminalReportForAutoExit = event;
+				await recordTerminalReportReceived(bridgeDir, event);
 			}
 			if (event.direction === "child_to_parent" && !terminalReport) {
 				nextLock = updateControlPlaneLockForChildActivity(nextLock, {
@@ -1460,8 +1563,16 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 			events = await finalizeManagedAgentAfterTerminalReport(launch, ctx);
 			parentState = await readBridgeParentState(bridgeDir);
 		}
-		const settlement = evaluateBridgeSettlement(events);
-		if (settlement.settledState !== "running") {
+		const settlement = evaluateBridgeSettlement(events, {
+			nowMs: Date.now(),
+			terminalExitTimeoutMs: TERMINAL_REPORT_EXIT_TIMEOUT_MS,
+		});
+		if (settlement.settledState === "terminal_report_exit_timeout" && settlement.terminalEvent) {
+			await recordTerminalReportExitTimeout(bridgeDir, settlement.terminalEvent);
+			await enqueueTerminalReportExitTimeout(bridgeDir, launch, settlement.terminalEvent, ctx);
+			parentState = await readBridgeParentState(bridgeDir);
+		}
+		if (isSettledTerminalState(settlement.settledState)) {
 			const finalizedAt = parentState.terminalFinalizedAt ?? nowIso();
 			const alreadyObserved =
 				Boolean(parentState.terminalObservedAt) &&
@@ -1626,6 +1737,25 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 		}
 	};
 
+	const processTerminalReportExitWatchdog = async (ctx: ExtensionContext): Promise<void> => {
+		const sessionKey = getSessionKey(ctx);
+		const statuses = await listManagedAgents(ctx, { scope: "session", includeExited: true }).catch(() => []);
+		for (const status of statuses) {
+			if (status.record.parentSessionKey !== sessionKey) continue;
+			if (status.bridgeSettlementState !== "terminal_report_exit_timeout") continue;
+			if (!status.record.bridgeDir) continue;
+			const events = await readBridgeEvents(status.record.bridgeDir).catch(() => []);
+			const settlement = evaluateBridgeSettlement(events, {
+				nowMs: Date.now(),
+				terminalExitTimeoutMs: TERMINAL_REPORT_EXIT_TIMEOUT_MS,
+			});
+			if (settlement.settledState !== "terminal_report_exit_timeout" || !settlement.terminalEvent) continue;
+			const launch = await readBridgeLaunch(status.record.bridgeDir);
+			await recordTerminalReportExitTimeout(status.record.bridgeDir, settlement.terminalEvent);
+			await enqueueTerminalReportExitTimeout(status.record.bridgeDir, launch, settlement.terminalEvent, ctx);
+		}
+	};
+
 	const stopBackgroundMonitor = (): void => {
 		if (!backgroundMonitorTimer) return;
 		clearInterval(backgroundMonitorTimer);
@@ -1637,6 +1767,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 		backgroundMonitorTimer = setInterval(() => {
 			runBackgroundTask(reconcileParentBridgeWatchers(ctx));
 			runBackgroundTask(processInactivityWatchdog(ctx));
+			runBackgroundTask(processTerminalReportExitWatchdog(ctx));
 		}, BACKGROUND_MONITOR_INTERVAL_MS);
 		backgroundMonitorTimer.unref?.();
 	};

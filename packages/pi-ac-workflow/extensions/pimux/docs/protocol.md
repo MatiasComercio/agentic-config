@@ -23,14 +23,17 @@ Implications:
 - `progress` is non-terminal
 - for a child that must ask the parent and continue in the same session, use `progress` with `requiresResponse=true`
 - `question` is terminal waiting-on-parent settlement; do not use it when the child should keep working after the answer
+- terminal report without exit -> `terminal_report_received`
+- terminal report still alive after timeout -> `terminal_report_exit_timeout`
 - `closeout + exit` -> `settled_completion`
 - `failure + exit` -> `settled_failure`
 - `blocker + exit` -> `settled_blocked`
 - `question + exit` -> `settled_waiting_on_parent`
 - exit without terminal declaration -> `protocol_violation`
 
-After a terminal child report, the pimux runtime should finalize the managed session promptly instead of leaving the child alive in an ambiguous post-closeout state.
+After a terminal child report, the pimux runtime finalizes the managed session promptly instead of leaving the child alive in an ambiguous post-closeout state.
 The child should not keep chatting or continue work after emitting a terminal report.
+`terminal_report_received` and `terminal_report_exit_timeout` are not settled success states; supervisors must wait for exit evidence or recover explicitly.
 Terminal settlement notification is durable parent-delivery work: bursty terminal reports may be batched, and a terminal notification remains retryable until the parent delivery queue records delivery metadata for that bridge.
 
 ## Nested orchestrator rule

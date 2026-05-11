@@ -18,7 +18,14 @@ import {
 	type NotificationMode,
 	type ThinkingEffort,
 } from "./paths.ts";
-import { evaluateBridgeSettlement, isSettledTerminalState, isTerminalChildReportEvent, type BridgeSettlementState } from "./settlement.ts";
+import {
+	DEFAULT_TERMINAL_REPORT_EXIT_TIMEOUT_MS,
+	evaluateBridgeSettlement,
+	isPendingTerminalReportState,
+	isSettledTerminalState,
+	isTerminalChildReportEvent,
+	type BridgeSettlementState,
+} from "./settlement.ts";
 import type { ManagedVisualRef } from "./tmux.ts";
 import { tmuxHasSession } from "./tmux.ts";
 
@@ -76,6 +83,8 @@ export interface SessionRegistryFile {
 
 export type AgentActivityState =
 	| "settled"
+	| "terminal_report_waiting_for_exit"
+	| "terminal_report_exit_timeout"
 	| "running_recent_activity"
 	| "running_quiet"
 	| "missing_session"
@@ -103,6 +112,8 @@ export interface ResolvedStatus {
 	effectiveStatus: AgentStatus;
 	bridgeSettlementState?: BridgeSettlementState;
 	bridgeSettlementFinalizedAt?: string;
+	bridgeTerminalReportObservedAt?: string;
+	bridgeTerminalReportExitTimedOutAt?: string;
 	bridgeProtocolViolationReason?: string;
 	recentBridgeEvents?: string[];
 }
@@ -198,6 +209,10 @@ function formatEffectiveStatusBadge(status: AgentStatus, colorize: boolean | und
 
 function formatSettlementBadge(state: BridgeSettlementState | undefined, colorize: boolean | undefined): string | undefined {
 	switch (state) {
+		case "terminal_report_received":
+			return badge("TERM", colorize, "yellow");
+		case "terminal_report_exit_timeout":
+			return badge("TIMEOUT", colorize, "red");
 		case "settled_completion":
 			return badge("DONE", colorize, "green");
 		case "settled_failure":
@@ -255,8 +270,10 @@ function resolveActivityState(
 	quietThresholdMs: number,
 ): AgentActivityState {
 	if (bridgeSettlementState === "protocol_violation") return "protocol_violation";
+	if (bridgeSettlementState === "terminal_report_exit_timeout") return "terminal_report_exit_timeout";
+	if (bridgeSettlementState === "terminal_report_received") return "terminal_report_waiting_for_exit";
 	if (status.record.status === "terminated" || status.effectiveStatus === "terminated") return "terminated";
-	if (bridgeSettlementState !== "running") return "settled";
+	if (isSettledTerminalState(bridgeSettlementState)) return "settled";
 	if (!status.hasSession || status.effectiveStatus === "missing") return "missing_session";
 	if (quietForMs !== undefined && quietForMs >= quietThresholdMs) return "running_quiet";
 	return "running_recent_activity";
@@ -268,7 +285,11 @@ export function buildAgentActivitySnapshot(
 	options: { nowMs?: number; quietThresholdMs?: number } = {},
 ): AgentActivitySnapshot {
 	const orderedEvents = sortBridgeEvents(events);
-	const settlement = evaluateBridgeSettlement(orderedEvents);
+	const nowMs = options.nowMs ?? Date.now();
+	const settlement = evaluateBridgeSettlement(orderedEvents, {
+		nowMs,
+		terminalExitTimeoutMs: DEFAULT_TERMINAL_REPORT_EXIT_TIMEOUT_MS,
+	});
 	const bridgeSettlementState = settlement.settledState !== "running"
 		? settlement.settledState
 		: status.bridgeSettlementState ?? "running";
@@ -276,7 +297,6 @@ export function buildAgentActivitySnapshot(
 	const lastChildReport = latestBridgeEvent(orderedEvents, (event) => event.direction === "child_to_parent");
 	const lastParentMessage = latestBridgeEvent(orderedEvents, (event) => event.direction === "parent_to_child");
 	const lastTerminalEvent = latestBridgeEvent(orderedEvents, isTerminalChildReportEvent);
-	const nowMs = options.nowMs ?? Date.now();
 	const lastActivityMs = parseIsoMs(lastEvent?.timestamp) ?? parseIsoMs(status.record.lastSeenAt) ?? parseIsoMs(status.record.updatedAt);
 	const quietForMs = lastActivityMs === undefined ? undefined : Math.max(0, nowMs - lastActivityMs);
 	const quietThresholdMs = options.quietThresholdMs ?? 10 * 60_000;
@@ -443,6 +463,8 @@ export async function resolveStatuses(stateRoot: string, registry: RegistryFile)
 
 		let bridgeSettlementState: BridgeSettlementState | undefined;
 		let bridgeSettlementFinalizedAt: string | undefined;
+		let bridgeTerminalReportObservedAt: string | undefined;
+		let bridgeTerminalReportExitTimedOutAt: string | undefined;
 		let bridgeProtocolViolationReason: string | undefined;
 		let recentBridgeEvents: string[] | undefined;
 		if (record.bridgeDir) {
@@ -450,14 +472,21 @@ export async function resolveStatuses(stateRoot: string, registry: RegistryFile)
 				readBridgeParentState(record.bridgeDir).catch(() => undefined),
 				readBridgeEvents(record.bridgeDir).catch(() => []),
 			]);
-			const settled = evaluateBridgeSettlement(events);
+			const settled = evaluateBridgeSettlement(events, {
+				nowMs: Date.now(),
+				terminalExitTimeoutMs: DEFAULT_TERMINAL_REPORT_EXIT_TIMEOUT_MS,
+			});
 			if (settled.settledState !== "running") {
 				bridgeSettlementState = settled.settledState;
 				bridgeProtocolViolationReason = settled.protocolViolationReason;
 			}
 			const bridgeParentState = parentState as BridgeParentState | undefined;
-			bridgeSettlementState ??= bridgeParentState?.terminalState;
+			if (bridgeSettlementState === undefined || (bridgeSettlementState === "terminal_report_received" && bridgeParentState?.terminalState === "terminal_report_exit_timeout")) {
+				bridgeSettlementState = bridgeParentState?.terminalState;
+			}
 			bridgeSettlementFinalizedAt = bridgeParentState?.terminalFinalizedAt;
+			bridgeTerminalReportObservedAt = bridgeParentState?.terminalReportObservedAt;
+			bridgeTerminalReportExitTimedOutAt = bridgeParentState?.terminalReportExitTimedOutAt;
 			bridgeProtocolViolationReason ??= bridgeParentState?.protocolViolationReason;
 			recentBridgeEvents = formatRecentBridgeEvents(events);
 		}
@@ -468,6 +497,8 @@ export async function resolveStatuses(stateRoot: string, registry: RegistryFile)
 			effectiveStatus,
 			bridgeSettlementState,
 			bridgeSettlementFinalizedAt,
+			bridgeTerminalReportObservedAt,
+			bridgeTerminalReportExitTimedOutAt,
 			bridgeProtocolViolationReason,
 			recentBridgeEvents,
 		});
@@ -500,6 +531,8 @@ export function formatAgentDetails(status: ResolvedStatus): string[] {
 		`status: ${status.effectiveStatus} | ${statusBadge}`,
 		`bridgeSettlementState: ${status.bridgeSettlementState ?? "running"}${settlementBadge ? ` | ${settlementBadge}` : ""}`,
 		status.bridgeSettlementFinalizedAt ? `bridgeSettlementFinalizedAt: ${status.bridgeSettlementFinalizedAt}` : undefined,
+		status.bridgeTerminalReportObservedAt ? `bridgeTerminalReportObservedAt: ${status.bridgeTerminalReportObservedAt}` : undefined,
+		status.bridgeTerminalReportExitTimedOutAt ? `bridgeTerminalReportExitTimedOutAt: ${status.bridgeTerminalReportExitTimedOutAt}` : undefined,
 		status.bridgeProtocolViolationReason ? `bridgeProtocolViolationReason: ${status.bridgeProtocolViolationReason}` : undefined,
 		recentBridgeEvents.length > 0 ? "recentBridgeEvents:" : undefined,
 		...recentBridgeEvents.map((event) => `  - ${event}`),
@@ -542,7 +575,11 @@ export function filterStatusesByScope(
 
 export function filterStatusesForList(statuses: ResolvedStatus[], includeExited = false): ResolvedStatus[] {
 	if (includeExited) return statuses;
-	return statuses.filter((status) => status.hasSession || status.effectiveStatus === "running");
+	return statuses.filter(
+		(status) => status.hasSession
+			|| status.effectiveStatus === "running"
+			|| (status.bridgeSettlementState !== undefined && !isSettledTerminalState(status.bridgeSettlementState)),
+	);
 }
 
 export function buildTreeNodes(statuses: ResolvedStatus[]): AgentTreeNode[] {
@@ -707,12 +744,16 @@ export function dashboardLines(statuses: ResolvedStatus[]): string[] {
 	const nodes = buildTreeNodes(statuses);
 	const liveCount = statuses.filter((status) => status.effectiveStatus === "running").length;
 	const openCount = statuses.filter((status) => status.record.visualMode === "iterm-opened").length;
-	const settledCount = statuses.filter((status) => status.bridgeSettlementState && status.bridgeSettlementState !== "running").length;
+	const pendingCount = statuses.filter((status) => status.bridgeSettlementState === "terminal_report_received").length;
+	const timeoutCount = statuses.filter((status) => status.bridgeSettlementState === "terminal_report_exit_timeout").length;
+	const settledCount = statuses.filter((status) => isSettledTerminalState(status.bridgeSettlementState)).length;
 	const header = [
 		"pimux",
 		`${statuses.length} agents`,
 		`live=${liveCount}`,
 		openCount > 0 ? `open=${openCount}` : undefined,
+		pendingCount > 0 ? `pending=${pendingCount}` : undefined,
+		timeoutCount > 0 ? `timeouts=${timeoutCount}` : undefined,
 		settledCount > 0 ? `settled=${settledCount}` : undefined,
 	].filter((part): part is string => Boolean(part)).join(" | ");
 	const lines = buildTreeLines(nodes);
@@ -737,6 +778,7 @@ export function parseAgeThresholdMs(value: string | undefined, fallback = "0s"):
 
 export function shouldPruneStatus(status: ResolvedStatus, mode: PruneMode): boolean {
 	if (status.effectiveStatus === "running") return false;
+	if (isPendingTerminalReportState(status.bridgeSettlementState)) return false;
 	if (mode === "auto") {
 		return status.record.status === "terminated" || status.effectiveStatus === "missing";
 	}

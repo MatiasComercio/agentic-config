@@ -231,6 +231,68 @@ def test_dashboard_lines_include_agent_counts_and_settlement_totals() -> None:
     assert result[0] == "pimux | 2 agents | live=1 | open=1 | settled=1"
 
 
+def test_dashboard_lines_distinguish_pending_terminal_reports() -> None:
+    """Pending terminal reports and exit timeouts should not inflate settled totals."""
+    result = run_runtime(
+        {
+            "action": "dashboard",
+            "statuses": [
+                status("root-a", root_agent_id="root-a", root_owner_session_key="session-a"),
+                status(
+                    "child-pending",
+                    root_agent_id="root-a",
+                    root_owner_session_key="session-a",
+                    parent_agent_id="root-a",
+                    bridge_state="terminal_report_received",
+                ),
+                status(
+                    "child-timeout",
+                    root_agent_id="root-a",
+                    root_owner_session_key="session-a",
+                    parent_agent_id="root-a",
+                    bridge_state="terminal_report_exit_timeout",
+                ),
+                status(
+                    "child-done",
+                    root_agent_id="root-a",
+                    root_owner_session_key="session-a",
+                    parent_agent_id="root-a",
+                    effective_status="missing",
+                    bridge_state="settled_completion",
+                ),
+            ],
+        }
+    )
+    assert result[0] == "pimux | 4 agents | live=3 | pending=1 | timeouts=1 | settled=1"
+
+
+def test_summary_badges_distinguish_terminal_pending_and_timeout() -> None:
+    """Selection labels should make terminal-report limbo visible."""
+    pending = run_runtime(
+        {
+            "action": "summary",
+            "status": status(
+                "child-pending",
+                root_agent_id="root-a",
+                root_owner_session_key="session-a",
+                bridge_state="terminal_report_received",
+            ),
+        }
+    )
+    timeout = run_runtime(
+        {
+            "action": "summary",
+            "status": status(
+                "child-timeout",
+                root_agent_id="root-a",
+                root_owner_session_key="session-a",
+                bridge_state="terminal_report_exit_timeout",
+            ),
+        }
+    )
+    assert "[TERM]" in pending
+    assert "[TIMEOUT]" in timeout
+
 
 def test_closeout_blockers_require_direct_children_to_reach_settled_completion() -> None:
     """Direct children that are not settled_completion should block parent closeout."""
@@ -251,9 +313,23 @@ def test_closeout_blockers_require_direct_children_to_reach_settled_completion()
             parent_agent_id="root-a",
             bridge_state="running",
         ),
+        status(
+            "child-pending",
+            root_agent_id="root-a",
+            root_owner_session_key="session-a",
+            parent_agent_id="root-a",
+            bridge_state="terminal_report_received",
+        ),
+        status(
+            "child-timeout",
+            root_agent_id="root-a",
+            root_owner_session_key="session-a",
+            parent_agent_id="root-a",
+            bridge_state="terminal_report_exit_timeout",
+        ),
     ]
     result = run_runtime({"action": "closeout-blockers", "statuses": statuses, "agentId": "root-a"})
-    assert [item["record"]["agentId"] for item in result] == ["child-blocking"]
+    assert [item["record"]["agentId"] for item in result] == ["child-blocking", "child-pending", "child-timeout"]
 
 
 

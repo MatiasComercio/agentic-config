@@ -217,6 +217,24 @@ def test_ping_agent_probe_gate_blocks_settled_and_missing_agents() -> None:
         {"action": "ping_gate", "activity": {"bridgeSettlementState": "settled_completion", "activityState": "settled"}}
     ) is False
     assert run_runtime(
+        {
+            "action": "ping_gate",
+            "activity": {
+                "bridgeSettlementState": "terminal_report_received",
+                "activityState": "terminal_report_waiting_for_exit",
+            },
+        }
+    ) is False
+    assert run_runtime(
+        {
+            "action": "ping_gate",
+            "activity": {
+                "bridgeSettlementState": "terminal_report_exit_timeout",
+                "activityState": "terminal_report_exit_timeout",
+            },
+        }
+    ) is False
+    assert run_runtime(
         {"action": "ping_gate", "activity": {"bridgeSettlementState": "running", "activityState": "missing_session"}}
     ) is False
     assert run_runtime(

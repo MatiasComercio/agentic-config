@@ -19,7 +19,7 @@ const payload = JSON.parse(process.argv[2]);
 const runtime = await import(pathToFileURL(helperPath).href);
 
 if (payload.action === "evaluate") {
-  process.stdout.write(JSON.stringify(runtime.evaluateBridgeSettlement(payload.events)));
+  process.stdout.write(JSON.stringify(runtime.evaluateBridgeSettlement(payload.events, payload.options)));
   process.exit(0);
 }
 
@@ -74,6 +74,7 @@ def event(
     event_type: str,
     *,
     direction: str = "child_to_parent",
+    timestamp: str | None = None,
     requires_response: bool | None = None,
 ) -> dict[str, Any]:
     """Build a synthetic bridge event payload."""
@@ -82,15 +83,31 @@ def event(
         "direction": direction,
         "type": event_type,
     }
+    if timestamp is not None:
+        payload["timestamp"] = timestamp
     if requires_response is not None:
         payload["requiresResponse"] = requires_response
     return payload
 
 
-def test_settlement_waits_for_exit_even_when_closeout_exists() -> None:
-    """A closeout declaration is non-terminal until the child exits."""
+def test_settlement_marks_closeout_received_until_exit_arrives() -> None:
+    """A closeout declaration is explicit pending terminal state until the child exits."""
     result = run_runtime({"action": "evaluate", "events": [event("closeout-1", "closeout")]})
-    assert result["settledState"] == "running"
+    assert result["settledState"] == "terminal_report_received"
+    assert result["terminalEvent"]["eventId"] == "closeout-1"
+
+
+def test_settlement_marks_terminal_report_exit_timeout() -> None:
+    """Terminal reports that outlive the exit timeout should be distinguishable from normal running work."""
+    result = run_runtime(
+        {
+            "action": "evaluate",
+            "events": [event("closeout-1", "closeout", timestamp="2026-05-11T18:10:05.895Z")],
+            "options": {"nowMs": 1_778_523_015_895, "terminalExitTimeoutMs": 10_000},
+        }
+    )
+    assert result["settledState"] == "terminal_report_exit_timeout"
+    assert result["terminalEvent"]["eventId"] == "closeout-1"
 
 
 def test_settlement_completes_only_after_closeout_and_exit() -> None:

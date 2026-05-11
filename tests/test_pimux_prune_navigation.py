@@ -152,6 +152,28 @@ def test_auto_prune_mode_excludes_exited_but_includes_terminated_and_missing() -
     assert result["candidates"] == ["terminated", "missing"]
 
 
+def test_prune_modes_exclude_pending_terminal_report_states() -> None:
+    """Unsettled terminal-report states should remain visible for recovery instead of being pruned."""
+    statuses = [
+        status(
+            "pending",
+            record_status="running",
+            effective_status="missing",
+            bridge_state="terminal_report_received",
+        ),
+        status(
+            "timeout",
+            record_status="running",
+            effective_status="missing",
+            bridge_state="terminal_report_exit_timeout",
+        ),
+    ]
+    manual = run_runtime({"action": "prune-helper", "olderThan": "1d", "mode": "manual", "statuses": statuses})
+    auto = run_runtime({"action": "prune-helper", "olderThan": "1d", "mode": "auto", "statuses": statuses})
+    assert manual["candidates"] == []
+    assert auto["candidates"] == []
+
+
 def test_navigation_and_prune_surfaces_are_wired_in_extension_and_docs() -> None:
     """The extension and docs should expose navigate/prune plus 1d auto-prune."""
     index_text = PIMUX_INDEX.read_text()
@@ -169,5 +191,5 @@ def test_navigation_and_prune_surfaces_are_wired_in_extension_and_docs() -> None
     assert '- `navigate`' in commands_text
     assert '- `prune`' in commands_text
     assert '- `smoke-nested`' in commands_text
-    assert 'Auto-prune removes `terminated` or `missing` pimux registry entries aged at least `1d`.' in commands_text
+    assert 'Auto-prune removes `terminated` or `missing` pimux registry entries aged at least `1d`; pending terminal-report states are retained for recovery.' in commands_text
     assert '/pimux smoke-nested' in commands_text

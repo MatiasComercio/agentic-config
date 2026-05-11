@@ -120,3 +120,30 @@ def test_zero_exit_without_terminal_report_synthesizes_exited_only(tmp_path: Pat
     assert events[0]["direction"] == "system"
     assert events[0]["type"] == "exited"
     assert events[0]["summary"] == "stage-child exited before managed terminal settlement was finalized"
+
+
+def test_terminal_report_launcher_exit_appends_single_exited_event(tmp_path: Path) -> None:
+    """Terminal report plus launcher exit should create exactly one exited event even when retried."""
+    bridge_dir = create_bridge(tmp_path)
+    events_path = bridge_dir / "events.ndjson"
+    events_path.write_text(
+        json.dumps(
+            {
+                "eventId": "closeout-1",
+                "timestamp": "2026-05-11T18:10:05.895Z",
+                "launchId": "launch-123",
+                "direction": "child_to_parent",
+                "type": "closeout",
+                "from": {"agentId": "stage-child", "sessionName": "pi-stage-child"},
+                "summary": "done",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    run_runtime({"bridgeDir": str(bridge_dir), "exitStatus": 0})
+    run_runtime({"bridgeDir": str(bridge_dir), "exitStatus": 0})
+
+    events = read_events(bridge_dir)
+    assert [event["type"] for event in events] == ["closeout", "exited"]

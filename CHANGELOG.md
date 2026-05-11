@@ -26,6 +26,7 @@ All notable changes to agentic-config.
 ### Fixed
 
 - `pi-ac-workflow`: make `pi-bash.py` stream workers fail closed on prolonged child-output silence, fail fast on silent startup, run child stdin from `DEVNULL`, default inner launches to `--offline`, and persist failed lifecycle state in the latest-attempt manifest.
+- `pi-ac-workflow`: make pimux terminal reports enter explicit post-report states, auto-finalize managed child sessions, and surface exit timeouts instead of leaving closeout agents ambiguously running.
 
 ## [0.3.0] - 2026-04-30
 
