@@ -6,14 +6,20 @@ import { executeAskUserQuestion, normalizeAskUserArguments } from "../runtime.js
 function createInteractiveContext({ selections = [], inputs = [] } = {}) {
   const selectionQueue = [...selections];
   const inputQueue = [...inputs];
+  const selectCalls = [];
+  const inputCalls = [];
 
   return {
     hasUI: true,
+    selectCalls,
+    inputCalls,
     ui: {
-      async select() {
+      async select(title, options) {
+        selectCalls.push({ title, options });
         return selectionQueue.shift();
       },
-      async input() {
+      async input(title, placeholder) {
+        inputCalls.push({ title, placeholder });
         return inputQueue.shift();
       },
     },
@@ -211,4 +217,121 @@ test("returns unavailable when multi-select defaults do not satisfy the configur
 
   assert.equal(result.details.status, "unavailable");
   assert.match(result.content[0].text, /no valid default option/i);
+});
+
+test("single-select prompts auto-add Other and capture typed text", async () => {
+  const ctx = createInteractiveContext({
+    selections: ["Other"],
+    inputs: ["Use the staging project"],
+  });
+
+  const result = await executeAskUserQuestion(
+    {
+      question: "Which project should be used?",
+      options: ["Production"],
+    },
+    ctx,
+  );
+
+  assert.equal(result.details.status, "answered");
+  assert.deepEqual(ctx.selectCalls[0].options, ["Production", "Other"]);
+  assert.equal(ctx.inputCalls.length, 1);
+  assert.equal(result.details.answers[0].selectedOptions[0].label, "Other");
+  assert.equal(result.details.answers[0].otherText, "Use the staging project");
+  assert.match(result.content[0].text, /Other: Use the staging project/);
+});
+
+test("caller-provided Other captures typed text without duplication", async () => {
+  const ctx = createInteractiveContext({
+    selections: ["Other"],
+    inputs: ["Manual branch"],
+  });
+
+  const result = await executeAskUserQuestion(
+    {
+      question: "Which branch should be used?",
+      options: [
+        { label: "Current", value: "current" },
+        { label: "Other", value: "custom" },
+      ],
+    },
+    ctx,
+  );
+
+  assert.equal(result.details.status, "answered");
+  assert.equal(ctx.selectCalls[0].options.filter((option) => option === "Other").length, 1);
+  assert.equal(result.details.answers[0].selectedOptions[0].value, "custom");
+  assert.equal(result.details.answers[0].otherText, "Manual branch");
+});
+
+test("multi-select prompts support Other text while honoring bounds", async () => {
+  const ctx = createInteractiveContext({
+    selections: ["pnpm", "Other"],
+    inputs: ["yarn"],
+  });
+
+  const result = await executeAskUserQuestion(
+    {
+      question: "Which package managers should be configured?",
+      options: ["pnpm", "bun"],
+      multiSelect: true,
+      minSelections: 1,
+      maxSelections: 2,
+    },
+    ctx,
+  );
+
+  assert.equal(result.details.status, "answered");
+  assert.deepEqual(
+    result.details.answers[0].selectedOptions.map((option) => option.label),
+    ["pnpm", "Other"],
+  );
+  assert.equal(result.details.answers[0].otherText, "yarn");
+  assert.equal(ctx.inputCalls.length, 1);
+});
+
+test("no-options prompts remain plain free-text input", async () => {
+  const ctx = createInteractiveContext({ inputs: ["custom response"] });
+
+  const result = await executeAskUserQuestion(
+    {
+      question: "What should be used?",
+    },
+    ctx,
+  );
+
+  assert.equal(result.details.status, "answered");
+  assert.equal(result.details.answers[0].responseType, "input");
+  assert.equal(result.details.answers[0].text, "custom response");
+  assert.equal(ctx.selectCalls.length, 0);
+});
+
+test("non-interactive defaults do not see synthetic Other", async () => {
+  const result = await executeAskUserQuestion(
+    {
+      question: "Apply changes?",
+      options: ["Yes"],
+      defaultValue: "Other",
+      nonInteractive: "default",
+    },
+    {
+      hasUI: false,
+    },
+  );
+
+  assert.equal(result.details.status, "unavailable");
+  assert.match(result.content[0].text, /no valid default option/i);
+});
+
+test("dismissing Other text input cancels the prompt", async () => {
+  const result = await executeAskUserQuestion(
+    {
+      question: "Which project should be used?",
+      options: ["Production"],
+    },
+    createInteractiveContext({ selections: ["Other"] }),
+  );
+
+  assert.equal(result.details.status, "cancelled");
+  assert.match(result.content[0].text, /Other response prompt/);
 });

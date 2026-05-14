@@ -14,7 +14,7 @@ const ASK_USER_PARAMETERS = {
     },
     options: {
       type: "array",
-      description: "Optional single-select or multi-select options.",
+      description: "Optional single-select or multi-select options. Option prompts include an Other custom-input path.",
       items: {
         anyOf: [
           { type: "string" },
@@ -114,6 +114,7 @@ export default function askUserExtension(pi) {
     promptSnippet: "Ask the user for explicit approval, a selection, or a short free-text answer when a workflow requires it.",
     promptGuidelines: [
       "Keep prompts concise and concrete.",
+      "For option prompts, keep the Other custom-input path available so the user can answer outside the listed choices.",
       "Use one tool call per decision gate unless a short batched questionnaire is genuinely clearer.",
       "If the result status is cancelled or unavailable, stop and wait for the user instead of guessing.",
     ],

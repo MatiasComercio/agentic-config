@@ -1,3 +1,6 @@
+const OTHER_LABEL = "Other";
+const OTHER_PLACEHOLDER = "Type your response.";
+
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -55,6 +58,25 @@ function normalizeOption(option, index) {
     value: normalizeOptionalString(option.value) ?? label,
     description: normalizeOptionalString(option.description),
   };
+}
+
+function isOtherOption(option) {
+  return [option.label, option.value].some((value) => normalizeOptionalString(value)?.toLowerCase() === OTHER_LABEL.toLowerCase());
+}
+
+function buildPromptOptions(options) {
+  if (options.length === 0 || options.some(isOtherOption)) {
+    return [...options];
+  }
+
+  return [
+    ...options,
+    {
+      label: OTHER_LABEL,
+      value: OTHER_LABEL,
+      description: undefined,
+    },
+  ];
 }
 
 function normalizeQuestion(question, index, inheritedDefaults) {
@@ -235,8 +257,8 @@ function buildInputAnswer(question, index, text) {
   };
 }
 
-function buildSelectAnswer(question, index, selectedOptions) {
-  return {
+function buildSelectAnswer(question, index, selectedOptions, otherText) {
+  const answer = {
     status: "answered",
     index,
     header: question.header,
@@ -248,6 +270,12 @@ function buildSelectAnswer(question, index, selectedOptions) {
       description: option.description,
     })),
   };
+
+  if (otherText !== undefined) {
+    answer.otherText = otherText;
+  }
+
+  return answer;
 }
 
 function resolveNonInteractiveAnswer(question, index, nonInteractive) {
@@ -291,8 +319,12 @@ async function askInputQuestion(question, index, total, ctx) {
   return buildInputAnswer(question, index, response);
 }
 
+async function askOtherTextQuestion(question, index, total, ctx) {
+  return await ctx.ui.input(buildPromptTitle(question, index, total, OTHER_LABEL), question.placeholder ?? OTHER_PLACEHOLDER);
+}
+
 async function askSelectQuestion(question, index, total, ctx) {
-  const entries = buildMenuEntries(question.options);
+  const entries = buildMenuEntries(buildPromptOptions(question.options));
   const choice = await ctx.ui.select(
     buildPromptTitle(question, index, total),
     entries.map((entry) => entry.display),
@@ -306,24 +338,30 @@ async function askSelectQuestion(question, index, total, ctx) {
     return buildCancelledAnswer(question, index, `The selected option could not be resolved: ${choice}`);
   }
 
+  if (isOtherOption(selectedEntry.option)) {
+    const otherText = await askOtherTextQuestion(question, index, total, ctx);
+    if (otherText === undefined) {
+      return buildCancelledAnswer(question, index, "The user dismissed the Other response prompt.");
+    }
+
+    return buildSelectAnswer(question, index, [selectedEntry.option], otherText);
+  }
+
   return buildSelectAnswer(question, index, [selectedEntry.option]);
 }
 
 async function askMultiSelectQuestion(question, index, total, ctx) {
+  const promptOptions = buildPromptOptions(question.options);
   const selectedIndexes = [];
+  let otherText;
 
   while (true) {
-    const remainingEntries = buildMenuEntries(
-      question.options
-        .map((option, optionIndex) => ({ option, optionIndex }))
-        .filter(({ optionIndex }) => !selectedIndexes.includes(optionIndex))
-        .map(({ option }) => option),
-    ).map((entry, localIndex) => ({
+    const remainingOptions = promptOptions
+      .map((option, optionIndex) => ({ option, optionIndex }))
+      .filter(({ optionIndex }) => !selectedIndexes.includes(optionIndex));
+    const remainingEntries = buildMenuEntries(remainingOptions.map(({ option }) => option)).map((entry, entryIndex) => ({
       ...entry,
-      optionIndex: question.options.findIndex((option, optionIndex) => {
-        return !selectedIndexes.includes(optionIndex) && option === entry.option;
-      }),
-      localIndex,
+      optionIndex: remainingOptions[entryIndex].optionIndex,
     }));
 
     const doneLabel = buildUniqueDoneLabel(
@@ -333,7 +371,7 @@ async function askMultiSelectQuestion(question, index, total, ctx) {
     const menuOptions = [...remainingEntries.map((entry) => entry.display), doneLabel];
 
     const suffix = selectedIndexes.length > 0
-      ? `Selected: ${selectedIndexes.map((optionIndex) => question.options[optionIndex].label).join(", ")}`
+      ? `Selected: ${selectedIndexes.map((optionIndex) => promptOptions[optionIndex].label).join(", ")}`
       : "Select one option at a time.";
 
     const choice = await ctx.ui.select(buildPromptTitle(question, index, total, suffix), menuOptions);
@@ -353,7 +391,8 @@ async function askMultiSelectQuestion(question, index, total, ctx) {
       return buildSelectAnswer(
         question,
         index,
-        selectedIndexes.map((optionIndex) => question.options[optionIndex]),
+        selectedIndexes.map((optionIndex) => promptOptions[optionIndex]),
+        otherText,
       );
     }
 
@@ -362,12 +401,20 @@ async function askMultiSelectQuestion(question, index, total, ctx) {
       return buildCancelledAnswer(question, index, `The selected option could not be resolved: ${choice}`);
     }
 
+    if (isOtherOption(selectedEntry.option)) {
+      otherText = await askOtherTextQuestion(question, index, total, ctx);
+      if (otherText === undefined) {
+        return buildCancelledAnswer(question, index, "The user dismissed the Other response prompt.");
+      }
+    }
+
     selectedIndexes.push(selectedEntry.optionIndex);
     if (question.maxSelections !== undefined && selectedIndexes.length >= question.maxSelections) {
       return buildSelectAnswer(
         question,
         index,
-        selectedIndexes.map((optionIndex) => question.options[optionIndex]),
+        selectedIndexes.map((optionIndex) => promptOptions[optionIndex]),
+        otherText,
       );
     }
   }
@@ -381,7 +428,9 @@ function summarizeAnswer(answer) {
       return `${prefix}${answer.question} -> ${answer.text}`;
     }
 
-    const selected = answer.selectedOptions.map((option) => option.label).join(", ");
+    const selected = answer.selectedOptions
+      .map((option) => (isOtherOption(option) && answer.otherText !== undefined ? `${option.label}: ${answer.otherText}` : option.label))
+      .join(", ");
     return `${prefix}${answer.question} -> ${selected}`;
   }
 

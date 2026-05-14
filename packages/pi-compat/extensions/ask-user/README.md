@@ -12,9 +12,13 @@ Shared `AskUserQuestion` compat tool exported by `@agentic-config/pi-compat`.
 
 ## Supported prompt shapes
 - single selection via `options`
+- automatic `Other` choice on option prompts for custom typed responses
 - sequential multi-question batches via `questions[]`
 - bounded multi-select prompts via `multiSelect: true`
 - free-text input when no `options` are provided
+
+## Other responses
+When a prompt defines `options`, the renderer appends one `Other` choice unless the caller already provided an option whose label or value is `Other`. Selecting it opens a free-text input and returns the selected option metadata plus `otherText`.
 
 ## Non-interactive behavior
 Use `nonInteractive` to control fallback when UI is unavailable:
