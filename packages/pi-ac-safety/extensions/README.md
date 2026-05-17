@@ -3,4 +3,5 @@
 This directory exports package-local pi extensions for `@agentic-config/pi-ac-safety`.
 
 Current shipped surface:
+- `bash-guidance.js` — adds concise Bash prompt guidance that steers agents away from `/dev/null` redirections without weakening guardians.
 - `hook-compat.js` — registers the bundled safety guardian scripts with the shared `@agentic-config/pi-compat` hook adapter using the package `assets/` directory as the packaged plugin root, including the current `playwright-cli` Bash guard surface.

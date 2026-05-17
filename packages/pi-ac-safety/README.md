@@ -14,6 +14,7 @@
 
 ### Shipped adapter-backed surface
 - `ac-safety-configure-safety`
+- Bash prompt guidance for avoiding `/dev/null` redirections before guardian denial
 - credential guardian parity
 - destructive bash guardian parity
 - supply-chain guardian parity

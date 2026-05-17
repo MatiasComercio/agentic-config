@@ -147,13 +147,13 @@ For each manager to be configured, run the version check BEFORE any config write
 
 ### Steps
 
-1. Run via Bash: `<manager> --version 2>/dev/null`
+1. Run via Bash: `<manager> --version`
    - If command fails (exit code != 0): check Corepack fallback for Yarn (see below).
    - If still fails: manager is NOT installed. Record status: `NOT_INSTALLED`. WARN and SKIP.
 2. **Yarn v4 Corepack detection** (special case):
    - `yarn --version` may return nothing or Yarn Classic (1.x) because Yarn v4 is managed via Corepack, NOT the `yarn` npm package.
-   - If `yarn --version` fails or returns `1.x`: run `corepack yarn --version 2>/dev/null` as fallback.
-   - If Corepack is not installed: run `corepack --version 2>/dev/null` to check, record the prerequisite command, and WARN -- but do NOT run `corepack enable` during detection.
+   - If `yarn --version` fails or returns `1.x`: run `corepack yarn --version` as fallback.
+   - If Corepack is not installed: run `corepack --version` to check, record the prerequisite command, and WARN -- but do NOT run `corepack enable` during detection.
    - If Corepack resolves Yarn v4 (>= 4.x): use that version. Record install command as `corepack prepare yarn@<version> --activate`.
    - If Corepack is unavailable and Yarn is not installed: status = `NOT_INSTALLED`, but include in update commands: `corepack enable && corepack prepare yarn@<version> --activate` for later explicit confirmation.
 3. Parse version string from output:
@@ -552,7 +552,7 @@ When `manager=auto` (default), detect which package managers are active in the p
      - `.yarnrc.yml` exists, OR
      - `package.json` contains a `"packageManager": "yarn@4.x"` field, OR
      - `.pnp.cjs` or `.yarn/` directory exists (Corepack-managed Yarn 4 projects may have these without `.yarnrc.yml` or `packageManager`), OR
-     - `yarn --version 2>/dev/null` returns a `4.x` version (runtime check as last resort)
+     - `yarn --version` returns a `4.x` version (runtime check as last resort)
      If only `yarn.lock` exists with NONE of the above markers AND the runtime version check fails or returns 1.x: WARN: "yarn.lock found but cannot confirm Yarn v4. Skipping. Use `manager=yarn` to force."
    - Bun: detected if `bun.lock` OR `bun.lockb` (legacy) OR `bunfig.toml` exists
    - npm: detected if `package-lock.json` exists. If other JS lockfiles (pnpm/yarn/bun) also exist, WARN: "package-lock.json found alongside <other lockfile>. npm included but may be secondary in this monorepo. Use `manager=npm` to configure explicitly if auto-detection excludes it." Still include npm in detection -- do NOT silently skip.
@@ -1239,7 +1239,9 @@ Look in `dependencies`, `devDependencies`, `peerDependencies`, `optionalDependen
 **Python (pyproject.toml / requirements.txt):**
 ```bash
 # Find dependencies with >=, ~=, !=, or * ranges
-grep -E '(>=|~=|!=|\*)' pyproject.toml requirements.txt 2>/dev/null
+for file in pyproject.toml requirements.txt; do
+  [ -f "$file" ] && grep -E '(>=|~=|!=|\*)' "$file"
+done
 ```
 
 **Cargo (Cargo.toml):**

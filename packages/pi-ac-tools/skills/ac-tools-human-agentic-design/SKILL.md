@@ -42,7 +42,7 @@ Detect available capabilities. Run these checks silently (no user prompting):
 ```bash
 # Check Playwright MCP availability (tool list includes mcp__playwright__*)
 # Check Node.js
-which node 2>/dev/null && node --version
+if NODE_BIN=$(command -v node); then "$NODE_BIN" --version; fi
 ```
 
 **Tier Selection:**
@@ -182,8 +182,8 @@ Do NOT error or warn loudly about Playwright absence. Simply skip the preview st
 ### Node.js Detection
 
 ```bash
-if command -v node &>/dev/null; then
-    NODE_VERSION=$(node --version)
+if NODE_BIN=$(command -v node); then
+    NODE_VERSION=$("$NODE_BIN" --version)
     echo "Node.js $NODE_VERSION detected - Tier B available"
 else
     echo "Node.js not found - Tier A only"

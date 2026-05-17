@@ -36,7 +36,7 @@ Creates GitHub issues in the central agentic-config repository (WaterplanAI/agen
 
 ```bash
 # Check if gh CLI is installed
-if ! command -v gh &>/dev/null; then
+if ! GH_BIN=$(command -v gh); then
   echo "ERROR: GitHub CLI (gh) not found"
   echo ""
   echo "Please install GitHub CLI: https://cli.github.com/"
@@ -44,7 +44,7 @@ if ! command -v gh &>/dev/null; then
 fi
 
 echo "Checking GitHub CLI authentication..."
-GH_AUTH_OUTPUT=$(gh auth status 2>&1)
+GH_AUTH_OUTPUT=$("$GH_BIN" auth status 2>&1)
 GH_AUTH_STATUS=$?
 
 if [ $GH_AUTH_STATUS -ne 0 ]; then
@@ -136,15 +136,20 @@ $ARGUMENTS = "\"Title\" \"Body text\""   -> Explicit, title="Title", body="Body 
 
 ```bash
 # Collect environment info (sanitized)
-ENV_OS=$(uname -s 2>/dev/null || echo "Unknown")
-ENV_OS_VERSION=$(uname -r 2>/dev/null || echo "Unknown")
-ENV_SHELL=$(basename "$SHELL" 2>/dev/null || echo "Unknown")
-ENV_GIT_VERSION=$(git --version 2>/dev/null | cut -d' ' -f3 || echo "Unknown")
-ENV_BRANCH=$(git branch --show-current 2>/dev/null || echo "N/A")
+ENV_OS=$(uname -s || echo "Unknown")
+ENV_OS_VERSION=$(uname -r || echo "Unknown")
+ENV_SHELL=$([ -n "${SHELL:-}" ] && basename "$SHELL" || echo "Unknown")
+if GIT_BIN=$(command -v git); then
+  ENV_GIT_VERSION=$("$GIT_BIN" --version | cut -d' ' -f3)
+  ENV_BRANCH=$("$GIT_BIN" branch --show-current || echo "N/A")
+else
+  ENV_GIT_VERSION="Unknown"
+  ENV_BRANCH="N/A"
+fi
 
 # Get agentic-config version from the current checkout when available
 if [ -f VERSION ]; then
-  ENV_AGENTIC_VERSION=$(tr -d '\n' < VERSION 2>/dev/null || echo "Unknown")
+  ENV_AGENTIC_VERSION=$(tr -d '\n' < VERSION || echo "Unknown")
 else
   ENV_AGENTIC_VERSION="Unknown"
 fi
