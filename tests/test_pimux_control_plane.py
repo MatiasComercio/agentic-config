@@ -79,6 +79,11 @@ if (payload.action === "no_polling_tool_result") {
   process.exit(0);
 }
 
+if (payload.action === "no_polling_child_activity") {
+  writeJson(runtime.updateNoPollingSupervisionForChildActivity(payload.supervision, payload.event, payload.now));
+  process.exit(0);
+}
+
 if (payload.action === "no_polling_terminal_settlement") {
   writeJson(runtime.updateNoPollingSupervisionForTerminalSettlement(payload.supervision, payload.event, payload.now));
   process.exit(0);
@@ -654,6 +659,20 @@ def test_explicit_live_inspection_allows_open_but_not_polling_checks_after_spawn
         )
         assert blocked["allow"] is False
 
+    blocked_message = run_runtime(
+        {
+            "action": "evaluate",
+            "lock": post_spawn,
+            "event": {
+                "toolName": "pimux",
+                "input": {"action": "send_message", "target": "mux-ospec-stage-001", "message": "Continue."},
+            },
+            "now": "2026-04-17T10:01:00Z",
+            "context": context,
+        }
+    )
+    assert blocked_message["allow"] is False
+
 
 def test_explicit_live_inspection_detection_is_conservative() -> None:
     """Live visual inspection intent should require both an open/show verb and a live/tab terminal noun."""
@@ -668,7 +687,7 @@ def test_explicit_live_inspection_detection_is_conservative() -> None:
 
 
 def test_post_spawn_blocks_recovery_message_before_child_activity() -> None:
-    """The parent should not message a child until a report arrives or the watchdog fires."""
+    """The parent should not message a child unless the child asks or the user explicitly instructs."""
     post_spawn = spawn_post_lock()
     first_message = run_runtime(
         {
@@ -683,15 +702,29 @@ def test_post_spawn_blocks_recovery_message_before_child_activity() -> None:
     )
     assert first_message == {
         "allow": False,
-        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Wait for a delivered child report before sending messages, unless the 10m inactivity watchdog has fired for recovery.",
+        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Child did not request input. Wait; do not nudge toward closeout.",
     }
 
+    user_directed_message = run_runtime(
+        {
+            "action": "evaluate",
+            "lock": post_spawn,
+            "event": {
+                "toolName": "pimux",
+                "input": {"action": "send_message", "target": "mux-ospec-stage-001", "message": "Use the explicit path."},
+            },
+            "context": {"explicitChildInstructionRequested": True},
+            "now": "2026-04-17T10:00:05Z",
+        }
+    )
+    assert user_directed_message == {"allow": True}
 
 
-def test_child_activity_rearms_one_recovery_message_not_polling_tools() -> None:
-    """A real child report should allow one reply but not reopen polling checks."""
+
+def test_child_activity_requires_response_before_parent_message_not_polling_tools() -> None:
+    """Ordinary progress should not re-arm messages; requiresResponse progress should allow one answer."""
     post_spawn = spawn_post_lock()
-    rearmed = run_runtime(
+    ordinary_progress = run_runtime(
         {
             "action": "child_activity",
             "lock": post_spawn,
@@ -699,13 +732,14 @@ def test_child_activity_rearms_one_recovery_message_not_polling_tools() -> None:
                 "agentId": "mux-ospec-stage-001",
                 "eventId": "evt-progress-1",
                 "timestamp": "2026-04-17T10:02:00Z",
+                "requiresResponse": False,
             },
         }
     )
     blocked_status = run_runtime(
         {
             "action": "evaluate",
-            "lock": rearmed,
+            "lock": ordinary_progress,
             "event": {"toolName": "pimux", "input": {"action": "status", "target": "mux-ospec-stage-001"}},
             "now": "2026-04-17T10:02:05Z",
         }
@@ -715,10 +749,10 @@ def test_child_activity_rearms_one_recovery_message_not_polling_tools() -> None:
         "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Do not poll pimux; wait for delivered child activity. status/activity/capture/tree/list/open are recovery-only; open is also allowed when the user explicitly asks to watch live. Other check actions are allowed only after terminal settlement or the 10m inactivity watchdog.",
     }
 
-    allowed_message = run_runtime(
+    blocked_nudge = run_runtime(
         {
             "action": "evaluate",
-            "lock": rearmed,
+            "lock": ordinary_progress,
             "event": {
                 "toolName": "pimux",
                 "input": {"action": "send_message", "target": "mux-ospec-stage-001", "message": "Continue."},
@@ -726,30 +760,58 @@ def test_child_activity_rearms_one_recovery_message_not_polling_tools() -> None:
             "now": "2026-04-17T10:02:10Z",
         }
     )
-    assert allowed_message == {"allow": True}
+    assert blocked_nudge == {
+        "allow": False,
+        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Child did not request input. Wait; do not nudge toward closeout.",
+    }
 
-    after_message = run_runtime(
+    needs_answer = run_runtime(
         {
-            "action": "update_tool_result",
-            "lock": rearmed,
-            "event": {"toolName": "pimux", "details": {"action": "send_message"}, "isError": False},
-            "now": "2026-04-17T10:02:10Z",
+            "action": "child_activity",
+            "lock": ordinary_progress,
+            "event": {
+                "agentId": "mux-ospec-stage-001",
+                "eventId": "evt-progress-2",
+                "timestamp": "2026-04-17T10:03:00Z",
+                "requiresResponse": True,
+            },
         }
     )
-    blocked_message = run_runtime(
+    allowed_answer = run_runtime(
         {
             "action": "evaluate",
-            "lock": after_message,
+            "lock": needs_answer,
+            "event": {
+                "toolName": "pimux",
+                "input": {"action": "send_message", "target": "mux-ospec-stage-001", "message": "Use option A."},
+            },
+            "now": "2026-04-17T10:03:10Z",
+        }
+    )
+    assert allowed_answer == {"allow": True}
+
+    after_answer = run_runtime(
+        {
+            "action": "update_tool_result",
+            "lock": needs_answer,
+            "event": {"toolName": "pimux", "details": {"action": "send_message"}, "isError": False},
+            "now": "2026-04-17T10:03:10Z",
+        }
+    )
+    blocked_second_answer = run_runtime(
+        {
+            "action": "evaluate",
+            "lock": after_answer,
             "event": {
                 "toolName": "pimux",
                 "input": {"action": "send_message", "target": "mux-ospec-stage-001", "message": "Again."},
             },
-            "now": "2026-04-17T10:02:30Z",
+            "now": "2026-04-17T10:03:30Z",
         }
     )
-    assert blocked_message == {
+    assert blocked_second_answer == {
         "allow": False,
-        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. A recovery send_message already went out for the current activity window. Wait for new child activity or the 10m inactivity watchdog before nudging again.",
+        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Child did not request input. Wait; do not nudge toward closeout.",
     }
 
 
@@ -890,26 +952,23 @@ def test_inactivity_watchdog_allows_one_follow_up_check_without_restarting_polli
 
 
 
-def test_inactivity_watchdog_can_reopen_one_recovery_message() -> None:
-    """The watchdog should also allow one concise recovery hint when the child has been quiet long enough."""
+def test_inactivity_watchdog_allows_neutral_probe_not_freeform_nudge() -> None:
+    """The watchdog should allow neutral ping_agent recovery, not a hurry-up message."""
     post_spawn = spawn_post_lock()
-    blocked_early = run_runtime(
+    blocked_early_ping = run_runtime(
         {
             "action": "evaluate",
             "lock": post_spawn,
-            "event": {
-                "toolName": "pimux",
-                "input": {"action": "send_message", "target": "mux-ospec-stage-001", "message": "Still there?"},
-            },
+            "event": {"toolName": "pimux", "input": {"action": "ping_agent", "target": "mux-ospec-stage-001"}},
             "now": "2026-04-17T10:05:00Z",
         }
     )
-    assert blocked_early == {
+    assert blocked_early_ping == {
         "allow": False,
-        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Wait for a delivered child report before sending messages, unless the 10m inactivity watchdog has fired for recovery.",
+        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Use ping_agent only for explicit user-requested liveness checks or after the 10m inactivity watchdog.",
     }
 
-    allowed_watchdog = run_runtime(
+    blocked_watchdog_message = run_runtime(
         {
             "action": "evaluate",
             "lock": post_spawn,
@@ -920,31 +979,31 @@ def test_inactivity_watchdog_can_reopen_one_recovery_message() -> None:
             "now": "2026-04-17T10:11:00Z",
         }
     )
-    assert allowed_watchdog == {"allow": True}
+    assert blocked_watchdog_message == {
+        "allow": False,
+        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. Child did not request input. Wait; do not nudge toward closeout.",
+    }
 
-    after_watchdog_message = run_runtime(
+    allowed_watchdog_ping = run_runtime(
         {
-            "action": "update_tool_result",
+            "action": "evaluate",
             "lock": post_spawn,
-            "event": {"toolName": "pimux", "details": {"action": "send_message"}, "isError": False},
+            "event": {"toolName": "pimux", "input": {"action": "ping_agent", "target": "mux-ospec-stage-001"}},
             "now": "2026-04-17T10:11:00Z",
         }
     )
-    blocked_again = run_runtime(
+    assert allowed_watchdog_ping == {"allow": True}
+
+    explicit_probe = run_runtime(
         {
             "action": "evaluate",
-            "lock": after_watchdog_message,
-            "event": {
-                "toolName": "pimux",
-                "input": {"action": "send_message", "target": "mux-ospec-stage-001", "message": "Again."},
-            },
-            "now": "2026-04-17T10:11:30Z",
+            "lock": post_spawn,
+            "event": {"toolName": "pimux", "input": {"action": "ping_agent", "target": "mux-ospec-stage-001"}},
+            "context": {"explicitChildProbeRequested": True},
+            "now": "2026-04-17T10:05:00Z",
         }
     )
-    assert blocked_again == {
-        "allow": False,
-        "reason": "Explicit mux-ospec parent is control-plane locked. Notify-first pacing is active. A recovery send_message already went out for the current activity window. Wait for new child activity or the 10m inactivity watchdog before nudging again.",
-    }
+    assert explicit_probe == {"allow": True}
 
 
 def test_no_polling_supervision_blocks_routine_pimux_inspection_after_spawn() -> None:
@@ -974,6 +1033,46 @@ def test_no_polling_supervision_blocks_routine_pimux_inspection_after_spawn() ->
     assert allowed_watchdog_status == {"allow": True}
 
 
+def test_no_polling_supervision_blocks_nudges_until_child_requests_input() -> None:
+    """Generic no-polling supervision should also be quality-first for parent messages."""
+    supervision = no_polling_supervision()
+    blocked_nudge = run_runtime(
+        {
+            "action": "evaluate_no_polling_supervision",
+            "supervision": supervision,
+            "event": {"toolName": "pimux", "input": {"action": "send_message", "target": "pimux-worker-001", "message": "Continue."}},
+            "now": "2026-04-17T10:01:00Z",
+        }
+    )
+    assert blocked_nudge == {
+        "allow": False,
+        "reason": "pimux no-polling supervision is active. Child did not request input. Wait; do not nudge toward closeout.",
+    }
+
+    needs_answer = run_runtime(
+        {
+            "action": "no_polling_child_activity",
+            "supervision": supervision,
+            "event": {
+                "agentId": "pimux-worker-001",
+                "eventId": "evt-progress-1",
+                "timestamp": "2026-04-17T10:02:00Z",
+                "requiresResponse": True,
+            },
+        }
+    )
+    allowed_answer = run_runtime(
+        {
+            "action": "evaluate_no_polling_supervision",
+            "supervision": needs_answer,
+            "event": {"toolName": "pimux", "input": {"action": "send_message", "target": "pimux-worker-001", "message": "Use option A."}},
+            "now": "2026-04-17T10:02:05Z",
+        }
+    )
+    assert allowed_answer == {"allow": True}
+
+
+
 def test_no_polling_supervision_allows_explicit_live_open_but_not_polling_checks() -> None:
     """Generic no-polling supervision should honor explicit live open without allowing polling."""
     supervision = no_polling_supervision()
@@ -1000,6 +1099,17 @@ def test_no_polling_supervision_allows_explicit_live_open_but_not_polling_checks
             }
         )
         assert blocked["allow"] is False
+
+    blocked_message = run_runtime(
+        {
+            "action": "evaluate_no_polling_supervision",
+            "supervision": supervision,
+            "event": {"toolName": "pimux", "input": {"action": "send_message", "target": "pimux-worker-001", "message": "Continue."}},
+            "now": "2026-04-17T10:01:00Z",
+            "context": context,
+        }
+    )
+    assert blocked_message["allow"] is False
 
 
 def test_no_polling_supervision_blocks_bash_sleep_wait_loops_but_allows_normal_commands() -> None:

@@ -11,7 +11,7 @@ Use one child when the task is bounded but should stay long-lived or visually in
 ## Scout -> planner replacement
 
 1. spawn a `scout`-style child to inventory the codebase
-2. let it run and wait for explicit `closeout`
+2. let it run and wait for evidence-backed explicit `closeout`; do not ask it to wrap up early
 3. pass the artifact or report path into a `planner`-style child
 4. let the planner return the execution plan
 

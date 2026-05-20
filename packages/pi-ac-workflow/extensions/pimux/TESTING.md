@@ -114,7 +114,8 @@ When modifying files under `packages/pi-ac-workflow/extensions/pimux/` (or the p
 1. run the focused tests relevant to the changed surface
 2. run the full regression command
 3. if the change touches routing, settlement, shutdown, watchdogs, activity probes, or nested orchestration behavior, run at least one real live smoke scenario with headless agents
-4. record any important new runtime findings in a local `tmp/` artifact during investigation, then update this document if the persistent validation story changes
+4. if the change touches parent follow-up gating, validate quality-first no-nudge behavior: ordinary progress must not re-arm `send_message`, while `requiresResponse=true` allows one answer
+5. record any important new runtime findings in a local `tmp/` artifact during investigation, then update this document if the persistent validation story changes
 
 ## Wrapper clean-exit guidance
 

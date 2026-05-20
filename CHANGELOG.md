@@ -22,6 +22,7 @@ All notable changes to agentic-config.
   - persists parent-delivery acknowledgements only after successful sends and requeues pending deliveries when queued-state persistence or sends fail
   - allows `pimux activity` as final settlement verification alongside `status`
   - allows `pimux open` during supervision only when the user explicitly asks to watch live, while routine polling checks remain blocked
+- `pi-ac-workflow`: make `pimux` supervision quality-first by blocking parent nudges after ordinary progress, allowing replies only for `requiresResponse=true` or explicit user instructions, and making liveness probes neutral instead of closeout-oriented.
 
 ### Fixed
 

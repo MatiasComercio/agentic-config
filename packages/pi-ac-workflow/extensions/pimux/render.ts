@@ -98,8 +98,9 @@ export function buildChildMessageContent(event: BridgeEvent): string {
 			message,
 			"",
 			"pimux status_request response contract:",
+			"- Quality, accuracy, and validation outrank speed; do not close out just because a probe arrived.",
 			"- If still working, call pimux report_parent with reportKind=progress and include the request id in the summary.",
-			"- If the work is complete, call pimux report_parent with reportKind=closeout.",
+			"- If the work is complete and validation/evidence are ready, call pimux report_parent with reportKind=closeout.",
 			"- If terminally blocked or failed, call report_parent with reportKind=blocker or reportKind=failure.",
 		].join("\n");
 	}

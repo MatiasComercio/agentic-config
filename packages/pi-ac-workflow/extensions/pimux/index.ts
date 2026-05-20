@@ -45,6 +45,9 @@ import {
 	buildUnlockedControlPlaneLock,
 	evaluateControlPlaneToolCall,
 	evaluateNoPollingSupervisionToolCall,
+	isExplicitChildInspectionRequest,
+	isExplicitChildInstructionRequest,
+	isExplicitChildProbeRequest,
 	isExplicitLiveInspectionRequest,
 	normalizeControlPlaneLockState,
 	normalizeNoPollingSupervisionState,
@@ -659,10 +662,12 @@ async function pingManagedAgent(
 	const summary = `status request ${requestId}`;
 	const payload = [
 		`PIMUX_STATUS_REQUEST ${requestId}`,
-		"Reply promptly via pimux report_parent:",
+		"Neutral liveness probe: quality, accuracy, and validation outrank speed.",
+		"Respond via pimux report_parent when you reach a natural checkpoint:",
 		"- reportKind=progress if you are still working; include this request id in the summary.",
-		"- reportKind=closeout if the mission is complete.",
+		"- reportKind=closeout only if the mission is complete and validation/evidence are ready.",
 		"- reportKind=blocker or reportKind=failure if terminally blocked or failed.",
+		"Do not close out just because this status request arrived.",
 		message?.trim() ? `Parent note: ${message.trim()}` : undefined,
 	].filter((line): line is string => Boolean(line)).join("\n");
 	const event = await appendBridgeEvent(record.bridgeDir, {
@@ -1315,6 +1320,9 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 	let controlPlaneLock: ControlPlaneLockState | undefined;
 	let noPollingSupervision: NoPollingSupervisionState | undefined;
 	let explicitLiveInspectionRequested = false;
+	let explicitChildInspectionRequested = false;
+	let explicitChildInstructionRequested = false;
+	let explicitChildProbeRequested = false;
 
 	const persistNoPollingSupervision = (nextState: NoPollingSupervisionState): void => {
 		noPollingSupervision = nextState;
@@ -1533,11 +1541,13 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 					agentId: launch.agentId,
 					eventId: event.eventId,
 					timestamp: event.timestamp,
+					requiresResponse: event.requiresResponse,
 				});
 				nextSupervision = updateNoPollingSupervisionForChildActivity(nextSupervision, {
 					agentId: launch.agentId,
 					eventId: event.eventId,
 					timestamp: event.timestamp,
+					requiresResponse: event.requiresResponse,
 				});
 			}
 			if (shouldDeliverBridgeEventToParent(event)) {
@@ -1719,7 +1729,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 				"Deterministic state:",
 				...formatAgentActivitySnapshot(activity).map((line) => `- ${line}`),
 				"",
-				"Recommended recovery: use pimux activity for a deterministic check, or pimux ping_agent to request a child response.",
+				"Recommended recovery: use pimux activity/status for a passive deterministic check first. Use pimux ping_agent only as a neutral liveness probe; do not ask the child to hurry or close out.",
 			].join("\n");
 			enqueueParentDelivery(
 				{
@@ -2199,6 +2209,9 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 
 	pi.on("input", async (event, ctx) => {
 		explicitLiveInspectionRequested = isExplicitLiveInspectionRequest(event.text);
+		explicitChildInspectionRequested = isExplicitChildInspectionRequest(event.text);
+		explicitChildInstructionRequested = isExplicitChildInstructionRequest(event.text);
+		explicitChildProbeRequested = isExplicitChildProbeRequest(event.text);
 		if (getCurrentEnv().agentId) {
 			return { action: "continue" as const };
 		}
@@ -2228,7 +2241,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 
 	pi.on("tool_call", async (event, ctx) => {
 		const currentLock = getParentControlPlaneLock(ctx, controlPlaneLock);
-		const toolContext = { explicitLiveInspectionRequested };
+		const toolContext = { explicitLiveInspectionRequested, explicitChildInspectionRequested, explicitChildInstructionRequested, explicitChildProbeRequested };
 		const decision = evaluateControlPlaneToolCall(currentLock, {
 			toolName: event.toolName,
 			input: event.input as Record<string, unknown> | undefined,
@@ -2419,9 +2432,9 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 			"FIRST: do not poll pimux and do not use Bash sleep/wait loops; wait for delivered child activity.",
 			"Use this tool when the user wants long-lived tmux-backed Pi agents managed from the current session.",
 			"Default to headless agents unless the user explicitly wants to watch live.",
-			"Use send_message for parent-to-child messaging and report_parent for child-to-parent reporting.",
-			"Use activity for deterministic no-capture state checks; use ping_agent to request a correlated child liveness response.",
-			"Treat status/activity/capture/tree/list/open as recovery-only after spawn; open is allowed when the user explicitly asks to watch live.",
+			"Use send_message only to answer child requests or user-directed child instructions; use report_parent for child-to-parent reporting.",
+			"Use activity for deterministic no-capture state checks; use ping_agent only as a neutral correlated liveness probe.",
+			"Treat status/activity/capture/tree/list/open as recovery-only after spawn; open is allowed when the user explicitly asks to watch live; do not nudge children toward closeout.",
 			"Use report_parent only from the authoritative direct pimux child session. Local helpers are local-only and must not call pimux or report_parent.",
 			"Success settles only after closeout plus child exit. Progress is non-terminal; question is terminal waiting-on-parent settlement.",
 			"For same-session child questions that must continue, use report_parent(progress, requiresResponse=true), not question.",

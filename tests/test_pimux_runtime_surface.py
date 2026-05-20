@@ -195,16 +195,19 @@ def test_parent_control_plane_lock_is_extension_enforced() -> None:
     assert 'Do not poll pimux; wait for delivered child activity.' in helper_text
     assert 'Do not use Bash sleep/wait loops for supervision' in helper_text
     assert 'status/activity/capture/tree/list/open are recovery-only' in helper_text
-    assert 'Wait for a delivered child report before sending messages' in helper_text
-    assert 'A recovery send_message already went out for the current activity window.' in helper_text
+    assert 'Child did not request input. Wait; do not nudge toward closeout.' in helper_text
+    assert 'Use ping_agent only for explicit user-requested liveness checks or after the' in helper_text
     assert 'Terminal settlement is ready. Use one final pimux status or activity check, then stop supervising this child.' in helper_text
     assert 'PIMUX HAPPY-PATH DISCIPLINE: this run is notify-first, not poll-first.' in helper_text
     assert 'FIRST: do not poll pimux and do not use Bash sleep/wait loops; wait for delivered child activity.' in helper_text
-    assert 'Allowed happy-path sequence: spawn -> wait for child report -> send_message once if needed -> wait for closeout -> final status verification.' in helper_text
+    assert 'Allowed happy-path sequence: spawn -> wait for child reports -> answer only requiresResponse=true requests or explicit user instructions -> wait for evidence-backed closeout -> final status/activity verification.' in helper_text
     assert 'after terminal settlement, use one final pimux status or activity check before advancing.' in helper_text
     assert 'Progress is non-terminal; question is terminal waiting-on-parent settlement.' in text
     assert 'For same-session child questions that must continue, use report_parent(progress, requiresResponse=true), not question.' in text
     assert 'For same-session parent input that you need before continuing, emit progress with requiresResponse=true.' in bridge_text
+    assert 'Quality, accuracy, and prompt/spec fidelity outrank speed.' in bridge_text
+    assert 'Do not close out because the parent asks for updates, says continue, or appears to be waiting.' in bridge_text
+    assert 'success criteria are checked, validation/evidence are ready to summarize, and known uncertainty/blockers are disclosed.' in bridge_text
     assert 'FIRST: do not poll pimux and do not use Bash sleep/wait loops; wait for delivered child activity.' in bridge_text
     assert 'NO-POLL: do not poll pimux or use Bash sleep/wait loops; wait for delivered child activity.' in text
     assert 'Use this spec path for the run, and create it first if missing:' in helper_text

@@ -30,6 +30,9 @@ export interface ControlPlaneLockState {
 	lastSupervisionResetAt?: string;
 	initialVerificationUsed?: boolean;
 	recoveryMessageUsed?: boolean;
+	pendingChildResponseEventId?: string;
+	pendingChildResponseAt?: string;
+	lastChildReportRequiresResponse?: boolean;
 	settlementVerificationPending?: boolean;
 }
 
@@ -44,6 +47,10 @@ export interface NoPollingSupervisionState {
 	lastChildEventId?: string;
 	lastChildActivityAt?: string;
 	lastSupervisionResetAt?: string;
+	recoveryMessageUsed?: boolean;
+	pendingChildResponseEventId?: string;
+	pendingChildResponseAt?: string;
+	lastChildReportRequiresResponse?: boolean;
 	settlementVerificationPending?: boolean;
 }
 
@@ -84,7 +91,6 @@ const MUX_OSPEC_MODIFIERS = new Set([
 
 const POST_SPAWN_ALLOWED_ACTIONS = new Set(["spawn", "status", "activity", "capture", "tree", "list", "send_message", "ping_agent", "open", "kill"]);
 const SUPERVISION_CHECK_ACTIONS = new Set(["status", "activity", "capture", "tree", "list", "open"]);
-const SUPERVISION_RECOVERY_ACTIONS = new Set(["send_message", "ping_agent"]);
 const SETTLEMENT_VERIFICATION_ACTIONS = new Set(["status", "activity"]);
 const UNRESTRICTED_POST_SPAWN_ACTIONS = new Set(["spawn", "kill"]);
 const BASH_WAIT_LOOP_PATTERN = /\b(?:while|until|for)\b[\s\S]*\b(?:sleep|wait)\b/i;
@@ -96,6 +102,9 @@ const SUPERVISION_CHECK_RECOVERY_DETAIL = `status/activity/capture/tree/list/ope
 
 export interface ControlPlaneToolContext {
 	explicitLiveInspectionRequested?: boolean;
+	explicitChildInspectionRequested?: boolean;
+	explicitChildInstructionRequested?: boolean;
+	explicitChildProbeRequested?: boolean;
 }
 
 interface BranchSpecEntry {
@@ -444,12 +453,32 @@ function isSupervisionCheckAction(action: string): boolean {
 	return SUPERVISION_CHECK_ACTIONS.has(action);
 }
 
-function isRecoveryAction(action: string): boolean {
-	return SUPERVISION_RECOVERY_ACTIONS.has(action);
+function isParentAnswerAction(action: string): boolean {
+	return action === "send_message";
+}
+
+function isRecoveryProbeAction(action: string): boolean {
+	return action === "ping_agent";
 }
 
 function isExplicitOpenAction(action: string, context?: ControlPlaneToolContext): boolean {
 	return action === "open" && context?.explicitLiveInspectionRequested === true;
+}
+
+function isExplicitChildInstructionAction(action: string, context?: ControlPlaneToolContext): boolean {
+	return isParentAnswerAction(action) && context?.explicitChildInstructionRequested === true;
+}
+
+function isExplicitChildProbeAction(action: string, context?: ControlPlaneToolContext): boolean {
+	return isRecoveryProbeAction(action) && context?.explicitChildProbeRequested === true;
+}
+
+function isExplicitPassiveInspectionAction(action: string, context?: ControlPlaneToolContext): boolean {
+	return (action === "status" || action === "activity") && context?.explicitChildInspectionRequested === true;
+}
+
+function hasPendingChildResponse(lock: Pick<ControlPlaneLockState, "pendingChildResponseEventId" | "recoveryMessageUsed">): boolean {
+	return Boolean(lock.pendingChildResponseEventId) && lock.recoveryMessageUsed !== true;
 }
 
 function isSettlementVerificationAction(action: string): boolean {
@@ -466,19 +495,17 @@ function isInactivityWatchdogReached(lock: ControlPlaneLockState, now?: string |
 	return resolveNowMs(now) - referenceMs >= CONTROL_PLANE_INACTIVITY_WATCHDOG_MS;
 }
 
-function hasDeliveredChildActivity(lock: ControlPlaneLockState): boolean {
-	return Boolean(lock.lastChildActivityAt || lock.lastChildEventId || lock.settlementVerificationPending);
-}
-
 function buildPostSpawnSupervisionState(
 	lock: ControlPlaneLockState,
 	occurredAt: string,
 	options: {
 		agentId?: string;
 		eventId?: string;
+		requiresResponse?: boolean;
 		settlementVerificationPending?: boolean;
 	},
 ): ControlPlaneLockState {
+	const requiresResponse = options.requiresResponse === true;
 	return {
 		...lock,
 		phase: "post_spawn",
@@ -488,6 +515,9 @@ function buildPostSpawnSupervisionState(
 		lastSupervisionResetAt: occurredAt,
 		initialVerificationUsed: false,
 		recoveryMessageUsed: false,
+		pendingChildResponseEventId: requiresResponse ? options.eventId ?? lock.pendingChildResponseEventId : undefined,
+		pendingChildResponseAt: requiresResponse ? occurredAt : undefined,
+		lastChildReportRequiresResponse: requiresResponse,
 		settlementVerificationPending: options.settlementVerificationPending ?? false,
 	};
 }
@@ -534,6 +564,7 @@ export function buildNoPollingSupervisionForSpawn(agentId: string | undefined, n
 		active: true,
 		lastSpawnedAgentId: agentId,
 		lastSupervisionResetAt: resolveNowIso(now),
+		recoveryMessageUsed: false,
 		settlementVerificationPending: false,
 	};
 }
@@ -567,6 +598,24 @@ export function isExplicitLiveInspectionRequest(text: string | undefined): boole
 	return /\b(open|show|watch|view)\b/.test(value) && /\b(live|tab|tabs|iterm|terminal|tmux)\b/.test(value);
 }
 
+export function isExplicitChildInstructionRequest(text: string | undefined): boolean {
+	const value = String(text ?? "").toLowerCase();
+	return /\b(send|tell|ask|message|instruct|reply|answer)\b/.test(value)
+		&& /\b(child|agent|worker|pimux|them|it)\b/.test(value);
+}
+
+export function isExplicitChildInspectionRequest(text: string | undefined): boolean {
+	const value = String(text ?? "").toLowerCase();
+	return /\b(status|activity|inspect|check|update)\b/.test(value)
+		&& /\b(child|agent|worker|pimux|them|it)\b/.test(value);
+}
+
+export function isExplicitChildProbeRequest(text: string | undefined): boolean {
+	const value = String(text ?? "").toLowerCase();
+	return /\b(ping|probe|check|ask)\b/.test(value)
+		&& /\b(liveness|status|alive|stuck|quiet|child|agent|worker|pimux)\b/.test(value);
+}
+
 export function evaluateNoPollingSupervisionToolCall(
 	supervision: NoPollingSupervisionState | undefined,
 	event: { toolName?: string; input?: Record<string, unknown> },
@@ -577,16 +626,31 @@ export function evaluateNoPollingSupervisionToolCall(
 
 	if (isPimuxTool(event.toolName)) {
 		const action = String(event.input?.action ?? "").trim();
-		if (!action || !isSupervisionCheckAction(action)) return { allow: true };
+		if (!action) return { allow: true };
 		if (isExplicitOpenAction(action, context)) return { allow: true };
+		if (isExplicitPassiveInspectionAction(action, context)) return { allow: true };
+		if (isExplicitChildInstructionAction(action, context)) return { allow: true };
+		if (isExplicitChildProbeAction(action, context)) return { allow: true };
 		if (supervision.settlementVerificationPending && isSettlementVerificationAction(action)) return { allow: true };
 		if (supervision.settlementVerificationPending) {
 			return buildNoPollingReason("Terminal settlement is ready. Use one final pimux status or activity check, then stop supervising this child.");
 		}
-		if (isInactivityWatchdogReached(supervision, now)) return { allow: true };
-		return buildNoPollingReason(
-			`Do not poll pimux; wait for delivered child activity. ${SUPERVISION_CHECK_RECOVERY_DETAIL}`,
-		);
+		if (isSupervisionCheckAction(action)) {
+			if (isInactivityWatchdogReached(supervision, now)) return { allow: true };
+			return buildNoPollingReason(
+				`Do not poll pimux; wait for delivered child activity. ${SUPERVISION_CHECK_RECOVERY_DETAIL}`,
+			);
+		}
+		if (isParentAnswerAction(action)) {
+			if (hasPendingChildResponse(supervision)) return { allow: true };
+			return buildNoPollingReason("Child did not request input. Wait; do not nudge toward closeout.");
+		}
+		if (isRecoveryProbeAction(action)) {
+			if (isInactivityWatchdogReached(supervision, now)) return { allow: true };
+			return buildNoPollingReason(
+				`Use ping_agent only for explicit user-requested liveness checks or after the ${CONTROL_PLANE_INACTIVITY_WATCHDOG_LABEL} inactivity watchdog.`,
+			);
+		}
 	}
 
 	if (isBashTool(event.toolName) && isRoutineWaitBashCommand(event.input?.command)) {
@@ -667,7 +731,7 @@ export function evaluateControlPlaneToolCall(
 		return { allow: true };
 	}
 
-	if (isExplicitOpenAction(action, context)) {
+	if (isExplicitOpenAction(action, context) || isExplicitPassiveInspectionAction(action, context)) {
 		return { allow: true };
 	}
 
@@ -691,21 +755,24 @@ export function evaluateControlPlaneToolCall(
 		);
 	}
 
-	if (isRecoveryAction(action)) {
-		const watchdogReached = isInactivityWatchdogReached(lock, now);
-		if (lock.recoveryMessageUsed && !watchdogReached) {
-			return buildNotifyFirstReason(
-				lock,
-				`Notify-first pacing is active. A recovery send_message already went out for the current activity window. Wait for new child activity or the ${CONTROL_PLANE_INACTIVITY_WATCHDOG_LABEL} inactivity watchdog before nudging again.`,
-			);
-		}
-		if (!hasDeliveredChildActivity(lock) && !watchdogReached) {
-			return buildNotifyFirstReason(
-				lock,
-				`Notify-first pacing is active. Wait for a delivered child report before sending messages, unless the ${CONTROL_PLANE_INACTIVITY_WATCHDOG_LABEL} inactivity watchdog has fired for recovery.`,
-			);
-		}
+	if (isExplicitChildInstructionAction(action, context) || isExplicitChildProbeAction(action, context)) {
 		return { allow: true };
+	}
+
+	if (isParentAnswerAction(action)) {
+		if (hasPendingChildResponse(lock)) return { allow: true };
+		return buildNotifyFirstReason(
+			lock,
+			"Notify-first pacing is active. Child did not request input. Wait; do not nudge toward closeout.",
+		);
+	}
+
+	if (isRecoveryProbeAction(action)) {
+		if (isInactivityWatchdogReached(lock, now)) return { allow: true };
+		return buildNotifyFirstReason(
+			lock,
+			`Notify-first pacing is active. Use ping_agent only for explicit user-requested liveness checks or after the ${CONTROL_PLANE_INACTIVITY_WATCHDOG_LABEL} inactivity watchdog.`,
+		);
 	}
 
 	return { allow: true };
@@ -725,6 +792,8 @@ export function updateNoPollingSupervisionForToolResult(
 			...supervision,
 			active: false,
 			lastSupervisionResetAt: occurredAt,
+			pendingChildResponseEventId: undefined,
+			pendingChildResponseAt: undefined,
 			settlementVerificationPending: false,
 		};
 	}
@@ -732,6 +801,22 @@ export function updateNoPollingSupervisionForToolResult(
 		return {
 			...supervision,
 			lastSupervisionResetAt: occurredAt,
+			recoveryMessageUsed: false,
+		};
+	}
+	if (isParentAnswerAction(action)) {
+		return {
+			...supervision,
+			pendingChildResponseEventId: undefined,
+			pendingChildResponseAt: undefined,
+			recoveryMessageUsed: true,
+		};
+	}
+	if (isRecoveryProbeAction(action)) {
+		return {
+			...supervision,
+			lastSupervisionResetAt: isInactivityWatchdogReached(supervision, now) ? occurredAt : supervision.lastSupervisionResetAt,
+			recoveryMessageUsed: true,
 		};
 	}
 	return supervision;
@@ -773,6 +858,8 @@ export function updateControlPlaneLockForToolResult(
 			lastSupervisionResetAt: occurredAt,
 			initialVerificationUsed: true,
 			recoveryMessageUsed: true,
+			pendingChildResponseEventId: undefined,
+			pendingChildResponseAt: undefined,
 			settlementVerificationPending: false,
 		};
 	}
@@ -786,7 +873,16 @@ export function updateControlPlaneLockForToolResult(
 		};
 	}
 
-	if (isRecoveryAction(action)) {
+	if (isParentAnswerAction(action)) {
+		return {
+			...lock,
+			pendingChildResponseEventId: undefined,
+			pendingChildResponseAt: undefined,
+			recoveryMessageUsed: true,
+		};
+	}
+
+	if (isRecoveryProbeAction(action)) {
 		return {
 			...lock,
 			lastSupervisionResetAt: isInactivityWatchdogReached(lock, now) ? occurredAt : lock.lastSupervisionResetAt,
@@ -799,19 +895,24 @@ export function updateControlPlaneLockForToolResult(
 
 export function updateNoPollingSupervisionForChildActivity(
 	supervision: NoPollingSupervisionState | undefined,
-	event: { agentId?: string; eventId?: string; timestamp?: string },
+	event: { agentId?: string; eventId?: string; timestamp?: string; requiresResponse?: boolean },
 	now?: string | number,
 ): NoPollingSupervisionState | undefined {
 	if (!supervision?.active || !isTrackedDirectChild({ active: true, lastSpawnedAgentId: supervision.lastSpawnedAgentId }, event.agentId)) {
 		return supervision;
 	}
 	const occurredAt = event.timestamp?.trim() || resolveNowIso(now);
+	const requiresResponse = event.requiresResponse === true;
 	return {
 		...supervision,
 		lastSpawnedAgentId: event.agentId ?? supervision.lastSpawnedAgentId,
 		lastChildEventId: event.eventId ?? supervision.lastChildEventId,
 		lastChildActivityAt: occurredAt,
 		lastSupervisionResetAt: occurredAt,
+		recoveryMessageUsed: false,
+		pendingChildResponseEventId: requiresResponse ? event.eventId ?? supervision.pendingChildResponseEventId : undefined,
+		pendingChildResponseAt: requiresResponse ? occurredAt : undefined,
+		lastChildReportRequiresResponse: requiresResponse,
 		settlementVerificationPending: false,
 	};
 }
@@ -837,7 +938,7 @@ export function updateNoPollingSupervisionForTerminalSettlement(
 
 export function updateControlPlaneLockForChildActivity(
 	lock: ControlPlaneLockState | undefined,
-	event: { agentId?: string; eventId?: string; timestamp?: string },
+	event: { agentId?: string; eventId?: string; timestamp?: string; requiresResponse?: boolean },
 	now?: string | number,
 ): ControlPlaneLockState | undefined {
 	if (!lock?.active || !lock.mode || lock.phase !== "post_spawn") return lock;
@@ -846,6 +947,7 @@ export function updateControlPlaneLockForChildActivity(
 	const nextLock = buildPostSpawnSupervisionState(lock, occurredAt, {
 		agentId: event.agentId,
 		eventId: event.eventId,
+		requiresResponse: event.requiresResponse,
 	});
 	if (
 		nextLock.lastChildEventId === lock.lastChildEventId
@@ -853,6 +955,9 @@ export function updateControlPlaneLockForChildActivity(
 		&& nextLock.lastSupervisionResetAt === lock.lastSupervisionResetAt
 		&& nextLock.initialVerificationUsed === lock.initialVerificationUsed
 		&& nextLock.recoveryMessageUsed === lock.recoveryMessageUsed
+		&& nextLock.pendingChildResponseEventId === lock.pendingChildResponseEventId
+		&& nextLock.pendingChildResponseAt === lock.pendingChildResponseAt
+		&& nextLock.lastChildReportRequiresResponse === lock.lastChildReportRequiresResponse
 		&& nextLock.settlementVerificationPending === lock.settlementVerificationPending
 	) {
 		return lock;
@@ -879,6 +984,9 @@ export function updateControlPlaneLockForTerminalSettlement(
 		&& nextLock.lastSupervisionResetAt === lock.lastSupervisionResetAt
 		&& nextLock.initialVerificationUsed === lock.initialVerificationUsed
 		&& nextLock.recoveryMessageUsed === lock.recoveryMessageUsed
+		&& nextLock.pendingChildResponseEventId === lock.pendingChildResponseEventId
+		&& nextLock.pendingChildResponseAt === lock.pendingChildResponseAt
+		&& nextLock.lastChildReportRequiresResponse === lock.lastChildReportRequiresResponse
 		&& nextLock.settlementVerificationPending === lock.settlementVerificationPending
 	) {
 		return lock;
@@ -920,6 +1028,9 @@ export function normalizeControlPlaneLockState(data: unknown): ControlPlaneLockS
 		lastSupervisionResetAt: typeof record.lastSupervisionResetAt === "string" ? record.lastSupervisionResetAt : undefined,
 		initialVerificationUsed: typeof record.initialVerificationUsed === "boolean" ? record.initialVerificationUsed : false,
 		recoveryMessageUsed: typeof record.recoveryMessageUsed === "boolean" ? record.recoveryMessageUsed : false,
+		pendingChildResponseEventId: typeof record.pendingChildResponseEventId === "string" ? record.pendingChildResponseEventId : undefined,
+		pendingChildResponseAt: typeof record.pendingChildResponseAt === "string" ? record.pendingChildResponseAt : undefined,
+		lastChildReportRequiresResponse: typeof record.lastChildReportRequiresResponse === "boolean" ? record.lastChildReportRequiresResponse : false,
 		settlementVerificationPending: typeof record.settlementVerificationPending === "boolean" ? record.settlementVerificationPending : false,
 	};
 }
@@ -935,6 +1046,10 @@ export function normalizeNoPollingSupervisionState(data: unknown): NoPollingSupe
 		lastChildEventId: typeof record.lastChildEventId === "string" ? record.lastChildEventId : undefined,
 		lastChildActivityAt: typeof record.lastChildActivityAt === "string" ? record.lastChildActivityAt : undefined,
 		lastSupervisionResetAt: typeof record.lastSupervisionResetAt === "string" ? record.lastSupervisionResetAt : undefined,
+		recoveryMessageUsed: typeof record.recoveryMessageUsed === "boolean" ? record.recoveryMessageUsed : false,
+		pendingChildResponseEventId: typeof record.pendingChildResponseEventId === "string" ? record.pendingChildResponseEventId : undefined,
+		pendingChildResponseAt: typeof record.pendingChildResponseAt === "string" ? record.pendingChildResponseAt : undefined,
+		lastChildReportRequiresResponse: typeof record.lastChildReportRequiresResponse === "boolean" ? record.lastChildReportRequiresResponse : false,
 		settlementVerificationPending: typeof record.settlementVerificationPending === "boolean" ? record.settlementVerificationPending : false,
 	};
 }
@@ -948,13 +1063,13 @@ export function buildControlPlaneSystemPrompt(lock: ControlPlaneLockState | unde
 		"- parent may use only pimux, AskUserQuestion, and say while this lock is active.",
 		lock.phase === "pre_spawn"
 			? "- Phase A before first child report: the only allowed pimux action is spawn."
-			: "- Phase B/C after spawn: wait for delivered child reports; send_message/ping_agent only after child activity; status/activity/capture/tree/list/open are recovery-only, except open when the user explicitly asks to watch live.",
+			: "- Phase B/C after spawn: wait for delivered child reports; answer only child requests marked requiresResponse=true or explicit user-directed instructions; status/activity/capture/tree/list/open are recovery-only, except open when the user explicitly asks to watch live.",
 		"- do not use parent-side Read/Bash/Edit/Write/NotebookEdit/Grep/Glob/web_search/subagent for repo work.",
 	];
 	if (lock.phase === "post_spawn") {
 		lines.push("- PIMUX HAPPY-PATH DISCIPLINE: this run is notify-first, not poll-first.");
 		lines.push("- Do not poll pimux or use Bash sleep/wait loops; wait for delivered child activity, and treat status/activity/capture/tree/list/open as recovery-only; open is also allowed when the user explicitly asks to watch live.");
-		lines.push("- Allowed happy-path sequence: spawn -> wait for child report -> send_message once if needed -> wait for closeout -> final status verification.");
+		lines.push("- Allowed happy-path sequence: spawn -> wait for child reports -> answer only requiresResponse=true requests or explicit user instructions -> wait for evidence-backed closeout -> final status/activity verification.");
 		lines.push(
 			`- Use status/activity/capture/tree/list/open only for suspected stall/protocol violation/failure, terminal settlement verification, or the ${CONTROL_PLANE_INACTIVITY_WATCHDOG_LABEL} inactivity watchdog; open is also allowed when the user explicitly asks to watch live.`,
 		);

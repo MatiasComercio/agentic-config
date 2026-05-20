@@ -79,7 +79,7 @@ Valid `report_parent` kinds:
 - `failure`
 - `closeout`
 
-Parent-side interface delivery should also show parent -> child bridge messages as concise pimux events without triggering an extra turn.
+Parent-side interface delivery should also show parent -> child bridge messages as concise pimux events without triggering an extra turn. Use `send_message` for child-requested answers or user-directed instructions, not hurry-up nudges.
 
 After a terminal `report_parent`, pimux first records `terminal_report_received`, finalizes the managed session, then reports a settled state only after exit evidence exists. If exit evidence does not arrive before timeout, status/activity surface `terminal_report_exit_timeout` with recovery guidance. Terminal settlement notifications remain retryable until the parent delivery queue records delivery.
 
@@ -89,7 +89,7 @@ After a terminal `report_parent`, pimux first records `terminal_report_received`
 - `tree` for hierarchy shape
 - `status` for one agent plus settlement state and pane tail
 - `activity` for deterministic no-capture state (`running_recent_activity`, `running_quiet`, `terminal_report_waiting_for_exit`, `terminal_report_exit_timeout`, `settled`, `missing_session`, `terminated`, or `protocol_violation`)
-- `ping_agent` / `ping` to send a correlated `status_request`; the child must respond with `progress` if still working or a terminal report if done, blocked, or failed
+- `ping_agent` / `ping` to send a correlated neutral `status_request`; the child must respond with `progress` if still working or a terminal report only when quality-gated done, blocked, or failed
 - `capture` for pane text
 - `open` to inspect live in iTerm
 - `navigate` to select a node from the current-session hierarchy and act on it
