@@ -46,7 +46,7 @@ Iterative visual + accessibility feedback using Playwright MCP tools.
 
 6. Stop server when done:
    ```bash
-   kill $SERVER_PID 2>/dev/null
+   kill "$SERVER_PID" || true
    ```
 
 ## Tier B Preview Sequence

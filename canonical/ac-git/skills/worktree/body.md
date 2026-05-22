@@ -205,12 +205,15 @@ for CONFIG_FILE in $(find "$WORKTREE_PATH" -name ".worktree.yml"); do
   done
 
   # Process root_symlinks (gitignored dirs symlinked from repo root)
-  REPO_ROOT=$(git -C "$WORKTREE_PATH" rev-parse --show-toplevel 2>/dev/null)
+  if ! REPO_ROOT=$(git -C "$WORKTREE_PATH" rev-parse --show-toplevel); then
+    REPO_ROOT="$WORKTREE_PATH"
+  fi
   # For worktrees, resolve to the main repo root
   MAIN_WORKTREE=$(git -C "$WORKTREE_PATH" worktree list --porcelain | head -1 | sed 's/^worktree //')
   [[ -n "$MAIN_WORKTREE" ]] && REPO_ROOT="$MAIN_WORKTREE"
 
-  for ASSET in $(yq '.root_symlinks[]' "$CONFIG_FILE" 2>/dev/null); do
+  ROOT_SYMLINKS=$(yq '.root_symlinks[]' "$CONFIG_FILE" || true)
+  for ASSET in $ROOT_SYMLINKS; do
     [[ -z "$ASSET" || "$ASSET" == "null" ]] && continue
     SOURCE="$REPO_ROOT/$ASSET"
     TARGET="$WORKTREE_PATH/$ASSET"

@@ -22,9 +22,13 @@ Look up known aliases before calling API:
 
 ```bash
 # Check for people.md customization (global aliases)
-cat ~/.agents/customization/gsuite/people.md 2>/dev/null
+if [ -f ~/.agents/customization/gsuite/people.md ]; then
+  cat ~/.agents/customization/gsuite/people.md
+fi
 # Also check tool-specific customizations (e.g., gcalendar.md may have aliases)
-cat ~/.agents/customization/gsuite/gcalendar.md 2>/dev/null
+if [ -f ~/.agents/customization/gsuite/gcalendar.md ]; then
+  cat ~/.agents/customization/gsuite/gcalendar.md
+fi
 ```
 
 ### 2. If Not in Preferences, Use People API

@@ -585,7 +585,11 @@ def _check_bash_write_scope(command: str, config: dict) -> tuple[str, str | None
             decision = "deny"
 
         if decision == "deny":
-            return "deny", f"BLOCKED: {reason}. Command denied by destructive-bash-guardian."
+            message = f"BLOCKED: {reason}."
+            if resolve_path(path) == resolve_path("/dev/null"):
+                message += " Retry without /dev/null or use command-specific quiet flags."
+            message += " Command denied by destructive-bash-guardian."
+            return "deny", message
         if decision == "ask":
             return "ask", reason
 

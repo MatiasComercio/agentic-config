@@ -34,7 +34,9 @@ Quick reference of available fields:
 ```bash
 # Check for sibling assets directory
 REPO_NAME=$(basename "$(git rev-parse --show-toplevel)")
-ls -la "../${REPO_NAME}-assets" 2>/dev/null
+if [ -d "../${REPO_NAME}-assets" ]; then
+  ls -la "../${REPO_NAME}-assets"
+fi
 
 # Check gitignored local assets
 git ls-files --others --ignored --exclude-standard --directory

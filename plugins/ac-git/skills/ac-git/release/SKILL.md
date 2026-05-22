@@ -134,7 +134,7 @@ If rebase conflicts:
 
 ### 3.1 Check if Tag Needs Update
 ```bash
-TAG_SHA=$(git rev-list -n1 {VERSION} 2>/dev/null)
+TAG_SHA=$(git rev-list -n1 {VERSION})
 HEAD_SHA=$(git rev-parse HEAD)
 ```
 

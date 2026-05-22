@@ -18,7 +18,7 @@ When parent is unknown, find closest by commit count:
 ```bash
 git branch -a --format='%(refname:short)' | while read b; do
   [[ "$b" == "$BRANCH" ]] && continue
-  base=$(git merge-base "$b" HEAD 2>/dev/null) || continue
+  base=$(git merge-base "$b" HEAD) || continue
   count=$(git rev-list --count "$base..HEAD")
   echo "$count $base $b"
 done | sort -n | head -5
@@ -41,7 +41,7 @@ REFLOG_ORIGIN=$(git reflog show "$BRANCH" --format='%H %gs' | grep 'branch: Crea
 if [[ "$REFLOG_ORIGIN" != "$MERGE_BASE" ]]; then
   echo "HISTORY REWRITTEN"
   # Check if reflog commit still ancestor
-  git merge-base --is-ancestor "$REFLOG_ORIGIN" HEAD 2>/dev/null && echo "Partial rebase" || echo "Full rebase/squash"
+  git merge-base --is-ancestor "$REFLOG_ORIGIN" HEAD && echo "Partial rebase" || echo "Full rebase/squash"
 fi
 ```
 
@@ -57,8 +57,8 @@ COMMIT_COUNT=$(git rev-list --count "$MERGE_BASE..HEAD")
 ```bash
 # Tags pointing to orphaned commits
 for tag in $(git tag); do
-  tag_sha=$(git rev-parse "$tag" 2>/dev/null)
-  git merge-base --is-ancestor "$tag_sha" HEAD 2>/dev/null || echo "Orphaned: $tag -> $tag_sha"
+  tag_sha=$(git rev-parse "$tag")
+  git merge-base --is-ancestor "$tag_sha" HEAD || echo "Orphaned: $tag -> $tag_sha"
 done
 ```
 

@@ -322,8 +322,8 @@ Keep this coordinator-owned.
 
 For each environment target path that now contains `.envrc`:
 ```bash
-if command -v direnv >/dev/null; then
-  (cd "$TARGET_PATH" && direnv allow)
+if DIRENV_BIN=$(command -v direnv); then
+  (cd "$TARGET_PATH" && "$DIRENV_BIN" allow)
 else
   echo "WARN: direnv not installed; skipped allow for $TARGET_PATH"
 fi

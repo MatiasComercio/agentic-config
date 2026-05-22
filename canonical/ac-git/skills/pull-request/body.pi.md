@@ -78,7 +78,7 @@ fi
 TARGET="${1:-main}"  # Default to main
 
 # Verify target exists on remote
-if ! git -C "$ROOT" rev-parse --verify "origin/$TARGET" >/dev/null 2>&1; then
+if ! git -C "$ROOT" show-ref --verify --quiet "refs/remotes/origin/$TARGET"; then
   echo "ERROR: Target branch 'origin/$TARGET' does not exist"
   echo "Available remote branches:"
   git -C "$ROOT" branch -r | grep -v HEAD
@@ -133,11 +133,11 @@ CWD_FROM_ROOT=${PWD#$ROOT/}
 # Search for CHANGELOG files
 for changelog in "CHANGELOG.md" "changelog.md" "CHANGES.md"; do
   CHANGELOG_PATH="$CWD_FROM_ROOT/$changelog"
-  if git -C "$ROOT" ls-files "$CHANGELOG_PATH" 2>/dev/null | grep -q .; then
+  if git -C "$ROOT" ls-files "$CHANGELOG_PATH" | grep -q .; then
     echo ""
     echo "CHANGELOG found: $CHANGELOG_PATH"
     echo "Recent entries:"
-    git -C "$ROOT" show "HEAD:$CHANGELOG_PATH" 2>/dev/null | head -80
+    git -C "$ROOT" show "HEAD:$CHANGELOG_PATH" | head -80
     break
   fi
 done
@@ -241,7 +241,7 @@ Generated with pi
 #### 5.1 Push Branch if Needed
 ```bash
 # Check if branch needs to be pushed
-UPSTREAM=$(git -C "$ROOT" rev-parse --abbrev-ref --symbolic-full-name @{upstream} 2>/dev/null || echo "")
+UPSTREAM=$(git -C "$ROOT" rev-parse --abbrev-ref --symbolic-full-name @{upstream} || true)
 
 if [ -z "$UPSTREAM" ]; then
   echo "Pushing branch to origin with upstream tracking..."
@@ -249,7 +249,7 @@ if [ -z "$UPSTREAM" ]; then
 else
   # Check if local is ahead of remote
   LOCAL_SHA=$(git -C "$ROOT" rev-parse HEAD)
-  REMOTE_SHA=$(git -C "$ROOT" rev-parse "@{upstream}" 2>/dev/null || echo "")
+  REMOTE_SHA=$(git -C "$ROOT" rev-parse "@{upstream}" || echo "")
 
   if [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
     echo "Pushing latest commits to origin..."

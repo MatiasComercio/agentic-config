@@ -130,8 +130,8 @@ Add the new variable to `.env.example` so future devs know it exists.
 ### 6. Verify
 
 ```bash
-# Check the secret is accessible
-gcloud secrets versions access latest --secret=SECRET_NAME --project=PROJECT > /dev/null && echo "OK"
+# Check the secret version exists without printing the secret value
+gcloud secrets versions describe latest --secret=SECRET_NAME --project=PROJECT --format="value(name)" && echo "OK"
 
 # Check Cloud Run revision has the secret
 gcloud run services describe ${STAGE_SERVICE} --region=${REGION} --project=${STAGE_PROJECT} \

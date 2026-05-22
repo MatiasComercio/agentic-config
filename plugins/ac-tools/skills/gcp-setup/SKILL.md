@@ -74,7 +74,8 @@ Detect `.gcp-setup.yml` in the project root.
 
 ```bash
 # GitHub repo from git remote
-GITHUB_SLUG=$(git remote get-url origin 2>/dev/null | sed -E 's#.*[:/]([^/]+/[^/.]+)(\.git)?$#\1#')
+GITHUB_REMOTE=$(git remote get-url origin || true)
+GITHUB_SLUG=$(printf "%s\n" "$GITHUB_REMOTE" | sed -E 's#.*[:/]([^/]+/[^/.]+)(\.git)?$#\1#')
 DIR_NAME=$(basename "$(pwd)")
 
 # Runtime + framework
@@ -83,28 +84,37 @@ RUNTIME=""
 [[ -f requirements.txt || -f pyproject.toml ]] && RUNTIME="python"
 [[ -f go.mod ]] && RUNTIME="go"
 FRAMEWORK=""
-grep -q '"express"' package.json 2>/dev/null && FRAMEWORK="express"
-grep -q 'fastapi' requirements.txt pyproject.toml 2>/dev/null && FRAMEWORK="fastapi"
+[[ -f package.json ]] && grep -q '"express"' package.json && FRAMEWORK="express"
+for file in requirements.txt pyproject.toml; do
+  [[ -f "$file" ]] && grep -q 'fastapi' "$file" && FRAMEWORK="fastapi"
+done
 
 # Feature detection from code/dependencies
 HAS_OAUTH=$(grep -rl -m 1 "passport\|GoogleStrategy\|google-auth-library\|authlib" \
   --include="*.ts" --include="*.js" --include="*.py" \
-  --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=vendor . 2>/dev/null | head -1)
+  --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=vendor . | head -1)
 HAS_FIRESTORE=$(grep -rl -m 1 "@google-cloud/firestore\|google.cloud.firestore" \
   --include="*.ts" --include="*.js" --include="*.py" --include="*.go" \
-  --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=vendor . 2>/dev/null | head -1)
+  --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=vendor . | head -1)
 
 # Build configs, Dockerfile, health endpoint
-CLOUDBUILD_FILES=$(ls cloudbuild*.yaml cloudbuild*.yml 2>/dev/null || true)
-DOCKERFILE=$(ls Dockerfile */Dockerfile 2>/dev/null | head -1)
+CLOUDBUILD_FILES=$(compgen -G "cloudbuild*.yaml"; compgen -G "cloudbuild*.yml")
+DOCKERFILE=$(find . -maxdepth 2 -name Dockerfile -print | head -1)
 HEALTH_EP=$(grep -roh '"/health[z]*"\|"/api/health"' \
-  --include="*.ts" --include="*.js" --include="*.py" . 2>/dev/null | head -1 | tr -d '"')
+  --include="*.ts" --include="*.js" --include="*.py" . | head -1 | tr -d '"')
 
 # Secret manifest from .env.example
-ENV_EXAMPLE=$(ls .env.example .env.sample env.example 2>/dev/null | head -1)
+ENV_EXAMPLE=""
+for candidate in .env.example .env.sample env.example; do
+  [[ -f "$candidate" ]] && ENV_EXAMPLE="$candidate" && break
+done
 
 # GCP projects (for matching)
-GCP_PROJECTS=$(gcloud projects list --format="value(projectId)" 2>/dev/null)
+if GCLOUD_BIN=$(command -v gcloud); then
+  GCP_PROJECTS=$("$GCLOUD_BIN" projects list --format="value(projectId)")
+else
+  GCP_PROJECTS=""
+fi
 ```
 
 Load user preferences from Phase 0a (`~/.agents/customization/gcp-setup/index.md`): domain, company, org, region.
@@ -385,7 +395,7 @@ STAGE=$(yq -r '.projects.stage.id' "$CONFIG")
 PROD=$(yq -r '.projects.prod.id' "$CONFIG")
 
 # Quick check — do APIs exist?
-gcloud services list --enabled --filter="name:run.googleapis.com" --project="$STAGE" --format="value(name)" 2>/dev/null
+gcloud services list --enabled --filter="name:run.googleapis.com" --project="$STAGE" --format="value(name)"
 ```
 
 Present state table to user and use AskUserQuestion:
@@ -541,7 +551,7 @@ When `oauth.mode` is `iap`, authentication is handled entirely by Google Cloud I
        --region="$REGION" \
        --member="allUsers" \
        --role="roles/run.invoker" \
-       --project="$PROJECT" 2>/dev/null || true
+       --project="$PROJECT" || true
    done
    ```
    > **Warning:** If `allUsers` has `roles/run.invoker`, anyone can bypass IAP by calling the Cloud Run URL directly. Always remove public access when enabling IAP.

@@ -35,13 +35,13 @@ Parse `$ARGUMENTS` into:
 
 ### 0.1 Fetch Remote
 ```bash
-git fetch origin main 2>/dev/null || git fetch origin master 2>/dev/null
+git fetch origin main || git fetch origin master
 ```
 
 ### 0.2 Determine BASE_BRANCH
 ```bash
 # Try origin/main first, fallback to origin/master
-git rev-parse origin/main >/dev/null 2>&1 && echo "origin/main" || echo "origin/master"
+git show-ref --verify --quiet refs/remotes/origin/main && echo "origin/main" || echo "origin/master"
 ```
 
 ### 0.3 Auto-Detect BACKLOG_PATH
@@ -69,7 +69,9 @@ Set `VERSION=""` (no version/tag will be created)
 ### 0.6 CHANGELOG Consistency Check (Critical for No-Args Mode)
 ```bash
 # Check if CHANGELOG.md exists and has [Unreleased] content
-grep -A 100 "\\[Unreleased\\]" CHANGELOG.md 2>/dev/null | grep -E "^- |^### " | head -20
+if [ -f CHANGELOG.md ]; then
+  grep -A 100 "\\[Unreleased\\]" CHANGELOG.md | grep -E "^- |^### " | head -20
+fi
 ```
 
 **If CHANGELOG [Unreleased] is EMPTY but commits exist since BASE_BRANCH:**
