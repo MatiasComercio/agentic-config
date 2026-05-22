@@ -89,7 +89,7 @@ Before ANY action: "Am I delegating or executing?"
 | Create directories | Bash("mkdir -p") | Directories only |
 | Run mux tools | Bash("uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/*.py") | Once per phase |
 | Launch programmatic pi worker | Bash("uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch ...", run_in_background=True) | File-protocol worker only |
-| Launch Claude Code CLI worker | Bash("uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash.py launch ...", run_in_background=True) | File-protocol worker only |
+| Launch Claude Code CLI worker | `cc-bash.py` retained but disabled | Do not use; `claude -p` subscription access is disabled |
 | Extract report summary | Bash("uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/extract-summary.py") | Bounded report access |
 | Ask user | AskUserQuestion() | As needed |
 | Voice update | mcp__voicemode__converse() | At milestones |
@@ -185,7 +185,7 @@ This ensures every subagent:
 
 ## PROGRAMMATIC CLI WORKERS -- SANCTIONED METHOD ONLY
 
-Direct `pi ... -p ...`, `claude -p ...`, and `npx @anthropic-ai/claude-code -p ...` Bash commands are forbidden in MUX. When a wave intentionally needs a programmatic CLI worker, launch the wrapper instead.
+Direct `pi ... -p ...`, `claude -p ...`, and `npx @anthropic-ai/claude-code -p ...` Bash commands are forbidden in MUX. When a wave intentionally needs a programmatic CLI worker, use `pi-bash.py`; `cc-bash.py` is disabled.
 
 For pi workers:
 
@@ -206,25 +206,9 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch \
   --stream
 ```
 
-For Claude Code CLI workers:
+Claude Code CLI workers are disabled. Do not run `cc-bash.py launch`; the wrapper exits non-zero before touching report/signal artifacts because Anthropic disabled subscription access to `claude -p`. Use `pi-bash.py`, Task workers, or pimux-native workers instead.
 
-```bash
-uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash.py launch \
-  "$SESSION_DIR" "$AGENT_ID" \
-  --role "$ROLE" \
-  --worker-type "$WORKER_TYPE" \
-  --objective "$OBJECTIVE" \
-  --scope "$SCOPE" \
-  --task "$TASK" \
-  --report-path "$REPORT_PATH" \
-  --signal-path "$SIGNAL_PATH" \
-  --model "$MODEL" \
-  --permission-mode "$PERMISSION_MODE" \
-  --cwd "$PROJECT_ROOT" \
-  --stream
-```
-
-Operational default: include `--stream` for wrapper launches so live child JSONL events appear in the background Bash task output. Omit it only for low-noise automation. Startup silence has two separate gates: `--startup-warn-after N` emits a warning, and `pi-bash.py` stream launches fail closed after the default 60-second `--startup-timeout` if no first child stdout/stderr arrives. Extended post-startup output silence is also fail-closed for `pi-bash.py` stream launches: the default idle timeout is 600 seconds, `--idle-timeout N` tunes it, and `--startup-timeout 0` or `--idle-timeout 0` disables a gate only for explicitly justified cases.
+Operational default: include `--stream` for `pi-bash.py` launches so live child JSONL events appear in the background Bash task output. Omit it only for low-noise automation. Startup silence has two separate gates: `--startup-warn-after N` emits a warning, and `pi-bash.py` stream launches fail closed after the default 60-second `--startup-timeout` if no first child stdout/stderr arrives. Extended post-startup output silence is also fail-closed for `pi-bash.py` stream launches: the default idle timeout is 600 seconds, `--idle-timeout N` tunes it, and `--startup-timeout 0` or `--idle-timeout 0` disables a gate only for explicitly justified cases.
 
 For `pi-bash.py`, always make the provider, model, and thinking level explicit either in the launch command or in `pi-bash.yaml`. Config precedence mirrors the safety config pattern: project `./pi-bash.yaml` > user `~/.claude/pi-bash.yaml` > wrapper `pi-bash.default.yaml`. The bundled default is provider `openai-codex`, model `gpt-5.5`, thinking `xhigh`. To write a config, run:
 
@@ -245,9 +229,9 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py auth-help --cwd "$PROJE
 
 Then run the shown `pi --provider ... --model ... --thinking ...` command, type `/login`, and select the matching OAuth/API-key provider. For the bundled Codex default, select ChatGPT Plus/Pro (Codex).
 
-The wrappers are foreground supervisors. Use Bash background execution from the harness when running them as background workers; do not add `&`, shell pipelines, redirection, or polling loops to the command string.
+`pi-bash.py` is a foreground supervisor. Use Bash background execution from the harness when running it as a background worker; do not add `&`, shell pipelines, redirection, or polling loops to the command string.
 
-`pi-bash.py` and `cc-bash.py` are intentionally reusable outside MUX. They validate file artifacts, keep stream stdout logs lean, write wrapper diagnostics, and return exactly `0` on protocol success, but they do not require a MUX ledger session. `pi-bash.py` preserves retry evidence in attempt-scoped logs (`<SESSION_DIR>/logs/<agent-id>.<attempt-id>.*`) and writes `<SESSION_DIR>/logs/<agent-id>.latest.json` to locate the newest attempt. With `--stream`, the wrappers persist sanitized child stdout events and mirror sanitized child stdout plus raw child stderr to wrapper stderr with an attribution prefix (`pi> ` or `cc> `) for live viewing; `pi-bash.py` runs child stdin from `DEVNULL`, passes `--offline` by default to avoid startup network checks before first output, fails terminally on default startup/idle timeouts, and records failed lifecycle state in the latest manifest. Use `--allow-startup-network` only when startup network checks are explicitly required. `--no-mirror` disables live child output while preserving logs, and `--raw-events` is explicit forensic opt-in. During active MUX execution, watch the background command output instead of tailing logs; after completion or explicit `deactivate.py`, inspect the events, stdout, stderr, wrapper logs, and latest manifest for diagnostics. If a strict declare-before-dispatch gate is desired, enforce it in the coordinator and follow the relevant cookbook.
+`pi-bash.py` is intentionally reusable outside MUX. It validates file artifacts, keeps stream stdout logs lean, writes wrapper diagnostics, and returns exactly `0` on protocol success, but it does not require a MUX ledger session. `pi-bash.py` preserves retry evidence in attempt-scoped logs (`<SESSION_DIR>/logs/<agent-id>.<attempt-id>.*`) and writes `<SESSION_DIR>/logs/<agent-id>.latest.json` to locate the newest attempt. With `--stream`, it persists sanitized child stdout events and mirrors sanitized child stdout plus raw child stderr to wrapper stderr with a `pi> ` attribution prefix for live viewing. `pi-bash.py` runs child stdin from `DEVNULL`, passes `--offline` by default to avoid startup network checks before first output, fails terminally on default startup/idle timeouts, and records failed lifecycle state in the latest manifest. Use `--allow-startup-network` only when startup network checks are explicitly required. `--no-mirror` disables live child output while preserving logs, and `--raw-events` is explicit forensic opt-in. During active MUX execution, watch the background command output instead of tailing logs; after completion or explicit `deactivate.py`, inspect the events, stdout, stderr, wrapper logs, and latest manifest for diagnostics. If a strict declare-before-dispatch gate is desired, enforce it in the coordinator and follow the relevant cookbook.
 
 ## ACCESSING REPORTS -- SANCTIONED METHOD ONLY
 
@@ -380,7 +364,7 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/check-signals.py $DIR --expected N
 uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/extract-summary.py $FILE              # Extract TOC + Executive Summary
 uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/extract-summary.py $FILE --metadata   # With file metadata
 uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch ...                # Launch supervised pi worker
-uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash.py launch ...                # Launch supervised Claude Code worker
+uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash.py launch ...                # Disabled compatibility stub; do not use
 ```
 
 For edge cases, refer to cookbook:
@@ -388,7 +372,7 @@ For edge cases, refer to cookbook:
 - `cookbook/anti-patterns.md` - Violation examples
 - `cookbook/bash-rules.md` - Bash command whitelist
 - `cookbook/pi-bash.md` - Programmatic pi worker wrapper and optional strict enforcement
-- `cookbook/cc-bash.md` - Claude Code CLI worker wrapper and optional strict enforcement
+- `cookbook/cc-bash.md` - Disabled Claude Code CLI worker stub
 - `cookbook/skill-delegation.md` - Skill routing
 
 **Path resolution:** Skill lives in `${CLAUDE_PLUGIN_ROOT}/skills/mux/`. Use `path` param for Glob (hidden dirs excluded from patterns).

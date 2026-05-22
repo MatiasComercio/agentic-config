@@ -281,7 +281,8 @@ def test_generated_mux_claude_frontmatter_survives_generation() -> None:
     assert "matcher: Read|Write|Edit|NotebookEdit|Grep|Glob|WebSearch|WebFetch|TaskOutput|Skill|Bash|Task" in mux_text
     assert "${CLAUDE_PLUGIN_ROOT}/skills/mux/hooks/mux-orchestrator-guard.py" in mux_text
     assert "${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch" in mux_text
-    assert "${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash.py launch" in mux_text
+    assert "`cc-bash.py` retained but disabled" in mux_text
+    assert "`cc-bash.py launch`; the wrapper exits non-zero" in mux_text
     assert "--stream" in mux_text
     assert "<SESSION_DIR>/logs/<agent-id>.<attempt-id>.*" in mux_text
     assert "<SESSION_DIR>/logs/<agent-id>.latest.json" in mux_text
@@ -351,6 +352,9 @@ def test_generated_pi_mux_foundation_assets_exist() -> None:
     assert 'f"{prefix}.raw-events.jsonl"' in pi_bash_text
     assert 'f"{prefix}.wrapper.log"' in pi_bash_text
     assert 'f"{safe_name}.latest.json"' in pi_bash_text
+    assert "CC_BASH_DISABLED_REASON" in cc_bash_text
+    assert "Anthropic disabled subscription access" in cc_bash_text
+    assert "raise CCBashError(CC_BASH_DISABLED_MESSAGE)" in cc_bash_text
     assert "--stream" in cc_bash_text
     assert '"stream-json" if args.stream else str(args.output_format)' in cc_bash_text
     assert 'command.append("--verbose")' in cc_bash_text

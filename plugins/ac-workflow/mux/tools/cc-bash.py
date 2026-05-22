@@ -3,7 +3,7 @@
 # requires-python = ">=3.11"
 # dependencies = []
 # ///
-"""Run a Claude Code print-mode worker behind a file-based contract."""
+"""Disabled Claude Code print-mode worker wrapper kept for compatibility."""
 
 from __future__ import annotations
 
@@ -80,6 +80,11 @@ REQUIRED_REPORT_HEADINGS = (
 )
 MAX_APPEND_SYSTEM_PROMPT_CHARS = 120_000
 CLAUDE_CODE_NPX_PACKAGE = "@anthropic-ai/claude-code"
+CC_BASH_DISABLED_REASON = "Anthropic disabled subscription access to `claude -p`."
+CC_BASH_DISABLED_MESSAGE = (
+    "cc-bash.py is disabled and will not launch Claude Code: "
+    f"{CC_BASH_DISABLED_REASON} Use pi-bash.py or native pimux workers instead."
+)
 
 
 class CCBashError(RuntimeError):
@@ -153,7 +158,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         if args.command == "launch":
-            return launch_from_args(args)
+            raise CCBashError(CC_BASH_DISABLED_MESSAGE)
         raise CCBashError(f"unsupported command: {args.command}")
     except CCBashError as error:
         print(f"ERROR: {error}", file=sys.stderr)

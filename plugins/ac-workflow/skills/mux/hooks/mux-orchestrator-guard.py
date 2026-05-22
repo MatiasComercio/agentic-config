@@ -17,7 +17,7 @@ ENFORCEMENT LAYERS:
 4. WebSearch/WebFetch - DENY (delegate to researcher)
 5. TaskOutput - DENY (use signals)
 6. Skill - Allowlisted direct call (only mux-ospec), otherwise DENY
-7. Bash - Whitelist (mkdir -p, uv run tools/*, pi-bash/cc-bash wrappers; direct pi/claude blocked)
+7. Bash - Whitelist (mkdir -p, uv run tools/*, pi-bash wrapper; cc-bash/direct pi/claude blocked)
 8. Task - Validate run_in_background=True
 
 Fail-closed: deny operations if hook encounters errors.
@@ -87,11 +87,16 @@ SEARCH_ALLOWLIST_PATTERNS = [
     r"(?:^|/)\.claude/hooks(?:/|$)",  # Hook discovery
 ]
 
+CC_BASH_DISABLED_PATTERN = r"^uv\s+run\s+.*\bcc-bash\.py\s+launch\b"
+CC_BASH_DISABLED_REASON = (
+    "cc-bash.py is disabled because Anthropic disabled subscription access to claude -p; "
+    "use pi-bash.py or native pimux workers."
+)
+
 # Bash command whitelist (regex patterns)
 BASH_WHITELIST_PATTERNS = [
     r"^mkdir\s+-p\s+",  # Create directories
     r"^uv\s+run\s+\${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash\.py\s+launch\b",  # pi worker wrapper
-    r"^uv\s+run\s+\${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/cc-bash\.py\s+launch\b",  # Claude Code worker wrapper
     r"^uv\s+run\s+.*tools/",  # Any tools/ invocation
     r"^uv\s+run\s+\${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/",  # MUX skill tools (explicit)
 ]
@@ -157,10 +162,12 @@ def is_bash_allowed(command: str) -> tuple[bool, str]:
     Returns (allowed, reason).
     """
     command = command.strip()
+    if re.match(CC_BASH_DISABLED_PATTERN, command):
+        return False, CC_BASH_DISABLED_REASON
     for pattern in BASH_WHITELIST_PATTERNS:
         if re.match(pattern, command):
             return True, f"Matches whitelist: {pattern}"
-    return False, "Command not in MUX whitelist. Allowed: mkdir -p, uv run tools/*, pi-bash.py wrapper, cc-bash.py wrapper"
+    return False, "Command not in MUX whitelist. Allowed: mkdir -p, uv run tools/*, pi-bash.py wrapper"
 
 
 def find_claude_pid() -> int | None:
