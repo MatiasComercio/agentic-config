@@ -123,6 +123,8 @@ def clear_mux_deactivation(marker_dir: Path) -> bool:
     deactivated_marker = marker_dir / MUX_DEACTIVATED_FILE_NAME
     if not deactivated_marker.exists():
         return False
+    if not deactivated_marker.is_file():
+        return False
     deactivated_marker.unlink()
     return True
 

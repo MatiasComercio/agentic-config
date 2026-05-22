@@ -8,6 +8,7 @@
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,30 @@ def _resolve_target_path(target: str) -> Path:
     raise ValueError(f"Unsupported persistence target: {target}")
 
 
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Atomically replace path with content using a same-directory temp file."""
+    try:
+        mode = path.stat().st_mode & 0o777
+    except FileNotFoundError:
+        mode = 0o600
+
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
+            tmp_file.write(content)
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())
+        os.chmod(tmp_path, mode)
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def main() -> None:
     payload = json.load(sys.stdin)
     if not isinstance(payload, dict):
@@ -70,7 +95,7 @@ def main() -> None:
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
     rendered = yaml.safe_dump(merged, sort_keys=False, allow_unicode=False)
-    target_path.write_text(rendered, encoding="utf-8")
+    _atomic_write_text(target_path, rendered)
 
     print(
         json.dumps(

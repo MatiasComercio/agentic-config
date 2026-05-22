@@ -294,13 +294,12 @@ def launch_from_args(args: argparse.Namespace) -> int:
     resolved_skills = tuple(resolve_skill(config.cwd, skill) for skill in config.skills)
     prompt = build_worker_prompt(config, resolved_skills)
     append_system_prompt = build_append_system_prompt(resolved_skills, config.append_system_prompts)
-    stdout_log, stderr_log, events_log, raw_events_log, wrapper_log = log_paths(
-        config.cwd,
-        config.session_dir,
-        config.agent_id,
-    )
-    report_abs = resolve_project_path(config.cwd, config.report_path)
-    signal_abs = resolve_project_path(config.cwd, config.signal_path)
+    session_abs = resolve_project_path(config.cwd, config.session_dir, "session_dir")
+    stdout_log, stderr_log, events_log, raw_events_log, wrapper_log = log_paths(session_abs, config.agent_id)
+    report_abs = resolve_project_path(config.cwd, config.report_path, "report_path")
+    signal_abs = resolve_project_path(config.cwd, config.signal_path, "signal_path")
+    ensure_path_inside_base(report_abs, session_abs, "report_path", "session_dir")
+    ensure_path_inside_base(signal_abs, session_abs, "signal_path", "session_dir")
     clear_previous_artifacts(report_abs=report_abs, signal_abs=signal_abs)
 
     result: int | None = None
@@ -1247,9 +1246,8 @@ def skill_directory_content_path(path: Path) -> Path:
     return markdown_files[0]
 
 
-def log_paths(cwd: Path, session_dir: str, agent_id: str) -> tuple[Path, Path, Path, Path, Path]:
+def log_paths(session_abs: Path, agent_id: str) -> tuple[Path, Path, Path, Path, Path]:
     """Return stdout, stderr, lean event, raw event, and wrapper log paths for the worker."""
-    session_abs = resolve_project_path(cwd, session_dir)
     safe_name = safe_log_name(agent_id)
     logs_dir = session_abs / "logs"
     return (
@@ -1267,12 +1265,26 @@ def safe_log_name(agent_id: str) -> str:
     return safe_name or "worker"
 
 
-def resolve_project_path(cwd: Path, value: str) -> Path:
-    """Resolve a project path relative to cwd unless already absolute."""
+def resolve_project_path(cwd: Path, value: str, path_name: str = "path") -> Path:
+    """Resolve a project path and require it to stay inside cwd."""
     path = Path(os.path.expandvars(value)).expanduser()
     if not path.is_absolute():
         path = cwd / path
-    return path.resolve(strict=False)
+    resolved = path.resolve(strict=False)
+    ensure_path_inside_base(resolved, cwd, path_name, "cwd")
+    return resolved
+
+
+def ensure_path_inside_base(path: Path, base: Path, path_name: str, base_name: str) -> None:
+    """Raise if path resolves outside base."""
+    resolved_path = path.resolve(strict=False)
+    resolved_base = base.resolve(strict=False)
+    try:
+        resolved_path.relative_to(resolved_base)
+    except ValueError as error:
+        raise CCBashError(
+            f"{path_name} must resolve inside {base_name}: {resolved_path} is outside {resolved_base}"
+        ) from error
 
 
 def clear_previous_artifacts(*, report_abs: Path, signal_abs: Path) -> None:
