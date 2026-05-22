@@ -168,6 +168,9 @@ def run_pi_bash(
     extra_args: Sequence[str] = (),
     env_overrides: Mapping[str, str] | None = None,
     model_args: Sequence[str] | None = None,
+    session_dir: str = "tmp/mux/session",
+    report_path: str = "tmp/mux/session/build/agent-1.md",
+    signal_path: str = "tmp/mux/session/.signals/agent-1.done",
 ) -> subprocess.CompletedProcess[str]:
     """Run pi-bash with a deterministic baseline command."""
     env = os.environ.copy()
@@ -192,7 +195,7 @@ def run_pi_bash(
         sys.executable,
         str(PI_BASH),
         "launch",
-        "tmp/mux/session",
+        session_dir,
         "agent-1",
         "--role",
         "project-defined builder role",
@@ -205,9 +208,9 @@ def run_pi_bash(
         "--task",
         "Write the report and signal files.",
         "--report-path",
-        "tmp/mux/session/build/agent-1.md",
+        report_path,
         "--signal-path",
-        "tmp/mux/session/.signals/agent-1.done",
+        signal_path,
         *resolved_model_args,
         "--skill",
         "builder",
@@ -253,7 +256,7 @@ def test_pi_bash_success_prints_zero_persists_logs_and_expands_prompt(tmp_path: 
         "--offline",
         "--no-extensions",
         "--tools",
-        "read,bash,edit,write,grep,find,ls",
+        "read,write,grep,find,ls",
         "--provider",
         "openai-codex",
         "--model",
@@ -277,6 +280,10 @@ def test_pi_bash_success_prints_zero_persists_logs_and_expands_prompt(tmp_path: 
     assert f"Requested: `{workspace / 'sentinel.md'}`" in prompt
     assert "Content SHA-256:" in prompt
     assert "final textual response must be exactly `0`" in prompt
+    assert "default pi-bash tool allowlist excludes Bash and Edit" in prompt
+    assert "After writing the report, create the success signal by writing this exact text" in prompt
+    assert "path: tmp/mux/session/build/agent-1.md\nstatus: success" in prompt
+    assert "uv run" not in prompt
 
 
 def test_pi_bash_uses_project_model_config_when_cli_model_args_are_omitted(tmp_path: Path) -> None:
@@ -414,7 +421,7 @@ def test_pi_bash_stream_tees_events_to_logs_and_wrapper_stderr(tmp_path: Path) -
     assert "fake stream stderr\n" in stderr_log.read_text()
 
     argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
-    assert argv[:6] == ["--offline", "--mode", "json", "--no-extensions", "--tools", "read,bash,edit,write,grep,find,ls"]
+    assert argv[:6] == ["--offline", "--mode", "json", "--no-extensions", "--tools", "read,write,grep,find,ls"]
     assert [argv[index + 1] for index, value in enumerate(argv) if value == "--provider"] == ["openai-codex"]
 
 
@@ -433,7 +440,7 @@ def test_pi_bash_stream_allows_startup_network_opt_out(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     argv = json.loads((tmp_path / "fake" / "argv.json").read_text())
     assert "--offline" not in argv
-    assert argv[:5] == ["--mode", "json", "--no-extensions", "--tools", "read,bash,edit,write,grep,find,ls"]
+    assert argv[:5] == ["--mode", "json", "--no-extensions", "--tools", "read,write,grep,find,ls"]
 
 
 def test_pi_bash_stream_defaults_to_bounded_startup_and_idle_timeouts(tmp_path: Path) -> None:
@@ -729,6 +736,109 @@ def test_pi_bash_clears_stale_protocol_artifacts_before_launch(tmp_path: Path) -
     assert "missing report file" in result.stderr
     assert not report_path.exists()
     assert not signal_path.exists()
+
+
+def test_pi_bash_accepts_absolute_protocol_paths_inside_session(tmp_path: Path) -> None:
+    """Absolute session/report/signal paths are allowed only when contained by cwd/session."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+    session_dir = workspace / "tmp" / "mux" / "session"
+    report_path = session_dir / "build" / "agent-1.md"
+    signal_path = session_dir / ".signals" / "agent-1.done"
+
+    result = run_pi_bash(
+        workspace=workspace,
+        fake_pi=fake_pi,
+        tmp_path=tmp_path,
+        session_dir=str(session_dir),
+        report_path=str(report_path),
+        signal_path=str(signal_path),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert report_path.exists()
+    assert signal_path.exists()
+
+
+def test_pi_bash_rejects_session_dir_outside_cwd_before_launch(tmp_path: Path) -> None:
+    """Session logs are never placed outside cwd."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+    outside_session = tmp_path / "outside-session"
+
+    result = run_pi_bash(
+        workspace=workspace,
+        fake_pi=fake_pi,
+        tmp_path=tmp_path,
+        session_dir=str(outside_session),
+        report_path=str(outside_session / "build" / "agent-1.md"),
+        signal_path=str(outside_session / ".signals" / "agent-1.done"),
+    )
+
+    assert result.returncode != 0
+    assert "session_dir must resolve inside cwd" in result.stderr
+    assert not (tmp_path / "fake" / "argv.json").exists()
+
+
+def test_pi_bash_rejects_protocol_paths_outside_session_before_cleanup(tmp_path: Path) -> None:
+    """Stale artifact cleanup cannot unlink paths outside the declared session."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+    victim = workspace / "reports" / "agent-1.md"
+    victim.parent.mkdir()
+    victim.write_text("do not delete")
+
+    result = run_pi_bash(
+        workspace=workspace,
+        fake_pi=fake_pi,
+        tmp_path=tmp_path,
+        report_path="reports/agent-1.md",
+    )
+
+    assert result.returncode != 0
+    assert "report_path must resolve inside session_dir" in result.stderr
+    assert victim.read_text() == "do not delete"
+    assert not (tmp_path / "fake" / "argv.json").exists()
+
+
+def test_pi_bash_rejects_absolute_protocol_path_outside_cwd_before_cleanup(tmp_path: Path) -> None:
+    """Absolute artifact paths outside cwd are rejected before stale cleanup."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+    victim = tmp_path / "outside-report.md"
+    victim.write_text("do not delete")
+
+    result = run_pi_bash(
+        workspace=workspace,
+        fake_pi=fake_pi,
+        tmp_path=tmp_path,
+        report_path=str(victim),
+    )
+
+    assert result.returncode != 0
+    assert "report_path must resolve inside cwd" in result.stderr
+    assert victim.read_text() == "do not delete"
+    assert not (tmp_path / "fake" / "argv.json").exists()
+
+
+def test_pi_bash_rejects_parent_directory_traversal_before_cleanup(tmp_path: Path) -> None:
+    """Parent traversal is rejected even when cleanup would target a file."""
+    workspace = create_workspace(tmp_path)
+    fake_pi = write_fake_pi(tmp_path)
+    victim = tmp_path / "outside-report.md"
+    victim.write_text("do not delete")
+
+    result = run_pi_bash(
+        workspace=workspace,
+        fake_pi=fake_pi,
+        tmp_path=tmp_path,
+        report_path="../outside-report.md",
+    )
+
+    assert result.returncode != 0
+    assert "report_path must not contain parent directory traversal" in result.stderr
+    assert victim.read_text() == "do not delete"
+    assert not (tmp_path / "fake" / "argv.json").exists()
 
 
 GENERIC_FAILURE_CASES = [

@@ -348,6 +348,12 @@ def test_generated_pi_mux_foundation_assets_exist() -> None:
     assert "gpt-5.5" in (MUX_TOOLS_ROOT / "pi-bash.default.yaml").read_text()
     assert "--heartbeat-interval" in pi_bash_text
     assert "--no-extensions" in pi_bash_text
+    assert 'DEFAULT_TOOL_ALLOWLIST = "read,write,grep,find,ls"' in pi_bash_text
+    assert "read,bash,edit,write" not in pi_bash_text
+    assert "default pi-bash tool allowlist excludes Bash and Edit" in pi_bash_text
+    assert "create the success signal by writing this exact text" in pi_bash_text
+    assert "ensure_path_inside_base(report_abs, session_abs" in pi_bash_text
+    assert "must not contain parent directory traversal" in pi_bash_text
     assert 'f"{prefix}.events.jsonl"' in pi_bash_text
     assert 'f"{prefix}.raw-events.jsonl"' in pi_bash_text
     assert 'f"{prefix}.wrapper.log"' in pi_bash_text

@@ -26,6 +26,8 @@ uv run ${CLAUDE_PLUGIN_ROOT}/skills/mux/tools/pi-bash.py launch \
 
 Operational default: include `--stream` for MUX launches so the coordinator can watch worker turn/tool events in the background command output. Omit it only for low-noise automation. Startup silence has two separate gates: `--startup-warn-after N` warns, and stream launches default to `--startup-timeout 60` to terminate if no first stdout/stderr line arrives. Extended output silence is also fail-closed: stream launches default to `--idle-timeout 600`, `--startup-timeout N` / `--idle-timeout N` tune the thresholds, and `--startup-timeout 0` / `--idle-timeout 0` disable gates only for explicitly justified cases.
 
+The default tool allowlist is least-privilege for file-protocol workers: `read,write,grep,find,ls`. Bash and Edit are not included unless the caller explicitly overrides `--tools`. The generated worker prompt tells pi to create the signal by writing the signal file content directly, not by running `signal.py` through a shell.
+
 Always make provider, model, and thinking explicit either in the launch command or in `pi-bash.yaml`. Config precedence mirrors the safety config pattern: project `./pi-bash.yaml` > user `~/.claude/pi-bash.yaml` > wrapper `pi-bash.default.yaml`. The bundled default is `openai-codex` / `gpt-5.5` / `xhigh`.
 
 Write or update project defaults with:
@@ -70,9 +72,13 @@ The wrapper is a foreground supervisor. If the worker should run in the backgrou
 - with `--startup-timeout`, fails terminally if no first stdout/stderr line arrives before the threshold
 - supervises stream and non-stream children with heartbeat diagnostics, optional runtime/idle timeouts, and sanitized process/session snapshots
 - fails terminally on default stream startup/idle timeouts and records failed lifecycle state in `logs/<agent-id>.latest.json`
-- defaults to `--no-extensions` with a built-in tool allowlist unless explicitly overridden
+- defaults to `--no-extensions` with the built-in `read,write,grep,find,ls` allowlist unless explicitly overridden
+- keeps Bash and Edit out of the default worker tool set
 - bounds stream-reader shutdown after child exit and logs cleanup warnings before protocol validation
-- removes stale declared report and signal files before launch
+- rejects session paths that resolve outside `cwd` or contain parent-directory traversal
+- writes logs only under the resolved session directory
+- requires declared report and signal paths to resolve inside the resolved session directory
+- removes stale declared report and signal files before launch, after path confinement succeeds
 - treats the file protocol as authoritative, recording non-zero child exits as diagnostics when protocol validation succeeds
 - requires the declared report file to exist
 - requires the declared signal file to exist

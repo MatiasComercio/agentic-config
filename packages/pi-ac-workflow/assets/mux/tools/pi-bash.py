@@ -33,7 +33,7 @@ DEFAULT_HANG_SNAPSHOT_AFTER_SECONDS = 120.0
 DEFAULT_RUNTIME_TIMEOUT_SECONDS = 0.0
 DEFAULT_IDLE_TIMEOUT_SECONDS = 0.0
 DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 600.0
-DEFAULT_TOOL_ALLOWLIST = "read,bash,edit,write,grep,find,ls"
+DEFAULT_TOOL_ALLOWLIST = "read,write,grep,find,ls"
 DEFAULT_MODEL_PROVIDER = "openai-codex"
 DEFAULT_MODEL = "gpt-5.5"
 DEFAULT_THINKING = "xhigh"
@@ -394,9 +394,12 @@ def launch_from_args(args: argparse.Namespace) -> int:
     config = parse_launch_config(args)
     resolved_skills = tuple(resolve_skill(config.cwd, skill) for skill in config.skills)
     prompt = build_worker_prompt(config, resolved_skills)
-    paths = log_paths(config.cwd, config.session_dir, config.agent_id, config.attempt_id)
-    report_abs = resolve_project_path(config.cwd, config.report_path)
-    signal_abs = resolve_project_path(config.cwd, config.signal_path)
+    session_abs = resolve_project_path(config.cwd, config.session_dir, "session_dir")
+    paths = log_paths(session_abs, config.agent_id, config.attempt_id)
+    report_abs = resolve_project_path(config.cwd, config.report_path, "report_path")
+    signal_abs = resolve_project_path(config.cwd, config.signal_path, "signal_path")
+    ensure_path_inside_base(report_abs, session_abs, "report_path", "session_dir")
+    ensure_path_inside_base(signal_abs, session_abs, "signal_path", "session_dir")
     clear_previous_artifacts(report_abs=report_abs, signal_abs=signal_abs)
 
     result: int | None = None
@@ -1634,19 +1637,7 @@ def summarize_tool_call(tool_call: dict[str, object]) -> str:
 
 def build_worker_prompt(config: LaunchConfig, skills: Sequence[ResolvedSkill]) -> str:
     """Synthesize the programmatic pi worker prompt from wrapper arguments."""
-    mux_root = Path(__file__).resolve().parent.parent
-    signal_command = " ".join(
-        [
-            "uv",
-            "run",
-            shlex.quote(str(mux_root / "tools" / "signal.py")),
-            shlex.quote(config.signal_path),
-            "--path",
-            shlex.quote(config.report_path),
-            "--status",
-            "success",
-        ]
-    )
+    signal_content = f"path: {config.report_path}\nstatus: success\n"
 
     lines = [
         "# pi-bash worker protocol",
@@ -1657,8 +1648,9 @@ def build_worker_prompt(config: LaunchConfig, skills: Sequence[ResolvedSkill]) -
         "Do not launch nested subagents.",
         "Do not use control-plane bridge tools or `report_parent`.",
         "",
-        "## Bash safety for programmatic workers",
-        "- Never run long-lived servers, watchers, or interactive commands in the foreground.",
+        "## Tool boundaries for programmatic workers",
+        "- The default pi-bash tool allowlist excludes Bash and Edit; use file writes for the declared report and signal only.",
+        "- If the caller explicitly enabled Bash, never run long-lived servers, watchers, or interactive commands in the foreground.",
         "- Every Bash command that can hang must include an explicit timeout or a background PID cleanup recipe.",
         "- For dev servers: start in the background, write logs to a declared file, wait with a bounded readiness loop, run checks, then kill the PID.",
         "- If a required command has no safe bounded form, document the deferral in the report instead of hanging.",
@@ -1690,10 +1682,10 @@ def build_worker_prompt(config: LaunchConfig, skills: Sequence[ResolvedSkill]) -
             "The `### Next Steps` subsection must state the recommended next action and any relevant file paths.",
             "",
             "## Required success signal",
-            "After writing the report, create the success signal with this exact command:",
+            "After writing the report, create the success signal by writing this exact text to the signal path:",
             "",
-            "```bash",
-            signal_command,
+            "```text",
+            signal_content.rstrip("\n"),
             "```",
             "",
         ]
@@ -1857,9 +1849,8 @@ def skill_directory_content_path(path: Path) -> Path:
     return markdown_files[0]
 
 
-def log_paths(cwd: Path, session_dir: str, agent_id: str, attempt_id: str) -> LaunchPaths:
+def log_paths(session_abs: Path, agent_id: str, attempt_id: str) -> LaunchPaths:
     """Return attempt-scoped log paths for the worker."""
-    session_abs = resolve_project_path(cwd, session_dir)
     safe_name = safe_log_name(agent_id)
     safe_attempt = safe_log_name(attempt_id)
     logs_dir = session_abs / "logs"
@@ -1880,12 +1871,38 @@ def safe_log_name(agent_id: str) -> str:
     return safe_name or "worker"
 
 
-def resolve_project_path(cwd: Path, value: str) -> Path:
-    """Resolve a project path relative to cwd unless already absolute."""
-    path = Path(os.path.expandvars(value)).expanduser()
+def resolve_project_path(cwd: Path, value: str, path_name: str = "path") -> Path:
+    """Resolve a project path and require it to stay inside cwd without traversal."""
+    raw_value = str(value)
+    if not raw_value.strip():
+        raise PiBashError(f"{path_name} is required")
+
+    path = Path(os.path.expandvars(raw_value)).expanduser()
+    if has_parent_reference(path):
+        raise PiBashError(f"{path_name} must not contain parent directory traversal: {value}")
     if not path.is_absolute():
         path = cwd / path
-    return path.resolve(strict=False)
+
+    resolved = path.resolve(strict=False)
+    ensure_path_inside_base(resolved, cwd, path_name, "cwd")
+    return resolved
+
+
+def has_parent_reference(path: Path) -> bool:
+    """Return whether a path contains explicit parent-directory traversal."""
+    return any(part == ".." for part in path.parts)
+
+
+def ensure_path_inside_base(path: Path, base: Path, path_name: str, base_name: str) -> None:
+    """Require a resolved path to be contained by a resolved base directory."""
+    resolved_path = path.resolve(strict=False)
+    resolved_base = base.resolve(strict=False)
+    try:
+        resolved_path.relative_to(resolved_base)
+    except ValueError as error:
+        raise PiBashError(
+            f"{path_name} must resolve inside {base_name}: {resolved_path} is outside {resolved_base}"
+        ) from error
 
 
 def clear_previous_artifacts(*, report_abs: Path, signal_abs: Path) -> None:
@@ -1942,7 +1959,8 @@ def validate_protocol_outputs(
     signal_report_path = signal_values.get("path")
     if signal_report_path is None:
         raise PiBashError(f"signal missing path field: {signal_abs}")
-    if resolve_project_path(cwd, signal_report_path) != resolve_project_path(cwd, report_path_arg):
+    signal_report_abs = resolve_project_path(cwd, signal_report_path, "signal path field")
+    if signal_report_abs != report_abs:
         raise PiBashError(
             f"signal path does not match declared report path: {signal_report_path} != {report_path_arg}"
         )

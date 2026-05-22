@@ -103,6 +103,8 @@ Claude Code CLI workers are disabled. Do not run `cc-bash.py launch`; it exits n
 
 Operational default: include `--stream` for `pi-bash.py` launches so live child JSONL events appear in the background Bash task output. Omit it only for low-noise or legacy automation. `pi-bash.py` stream launches fail closed after 60 seconds without first child stdout/stderr and after 600 seconds of later child-output silence unless the coordinator passes explicit `--startup-timeout` or `--idle-timeout` overrides.
 
+`pi-bash.py` defaults to the least-privilege `read,write,grep,find,ls` tool allowlist. Bash and Edit are excluded unless the caller explicitly overrides `--tools`; the worker creates its success signal by writing the signal file content directly. Session paths must resolve inside `cwd`, and report/signal paths must resolve inside the declared session directory before stale artifacts are removed.
+
 `pi-bash.py` validates the declared report and signal files after the child process exits. It does not require an active MUX ledger session; declare-before-dispatch matching is coordinator policy. With `--stream`, it also persists raw child stdout events to `<SESSION_DIR>/logs/<agent-id>.events.jsonl` and mirrors child stdout/stderr to wrapper stderr for live viewing. During active MUX execution, watch the background command output instead of tailing logs; after completion or explicit `deactivate.py`, inspect the events, stdout, and stderr logs for diagnostics. See `pi-bash.md` for optional strict orchestration guidance.
 
 ## Hook Whitelist Patterns
