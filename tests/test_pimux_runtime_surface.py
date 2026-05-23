@@ -242,6 +242,25 @@ def test_launcher_reports_startup_failures_and_exits_instead_of_dropping_to_a_sh
 
 
 
+def test_spawn_suppresses_dispatch_when_settlement_verification_is_pending() -> None:
+    """Spawn should return a structured suppression instead of bypassing pending settlement."""
+    text = PIMUX_INDEX.read_text()
+    assert "function buildSpawnSuppression(" in text
+    assert 'reason: "terminal_settlement_verification_pending"' in text
+    assert "requestedAgentId" in text
+    assert "relatedAgentId" in text
+
+    command_spawn_case = text.split('case "spawn": {', 1)[1].split('case "open": {', 1)[0]
+    assert "const suppression = buildSpawnSuppression(request, noPollingSupervision);" in command_spawn_case
+    assert "ctx.ui.notify(suppression.text, \"warning\")" in command_spawn_case
+    assert command_spawn_case.index("buildSpawnSuppression") < command_spawn_case.index("spawnManagedAgent")
+
+    tool_spawn_case = text.rsplit('case "spawn": {', 1)[1].split('case "open": {', 1)[0]
+    assert "const suppression = buildSpawnSuppression(request, noPollingSupervision);" in tool_spawn_case
+    assert "if (suppression) return buildToolResult(suppression.text, suppression.details);" in tool_spawn_case
+    assert tool_spawn_case.index("buildSpawnSuppression") < tool_spawn_case.index("spawnManagedAgent")
+
+
 def test_spawn_forwards_explicit_thinking_effort_to_child_pi() -> None:
     """pimux spawn should expose and forward Pi's standalone --thinking effort flag."""
     index_text = PIMUX_INDEX.read_text()

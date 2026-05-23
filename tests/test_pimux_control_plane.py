@@ -163,6 +163,21 @@ def no_polling_supervision(spawned_at: str = "2026-04-17T10:00:00Z") -> dict[str
     )
 
 
+def settled_no_polling_supervision() -> dict[str, Any]:
+    """Create no-polling supervision with terminal settlement verification pending."""
+    return run_runtime(
+        {
+            "action": "no_polling_terminal_settlement",
+            "supervision": no_polling_supervision(),
+            "event": {
+                "agentId": "pimux-worker-001",
+                "eventId": "evt-closeout-1",
+                "timestamp": "2026-04-17T10:03:00Z",
+            },
+        }
+    )
+
+
 def spawn_post_lock(spawned_at: str = "2026-04-17T10:00:00Z") -> dict[str, Any]:
     """Create a post-spawn mux-ospec lock at a fixed timestamp for pacing tests."""
     pre_spawn = run_runtime(
@@ -1141,18 +1156,7 @@ def test_no_polling_supervision_blocks_bash_sleep_wait_loops_but_allows_normal_c
 
 def test_no_polling_supervision_allows_one_final_status_or_activity_after_terminal_settlement() -> None:
     """Terminal settlement should reopen exactly one final status/activity check for verification."""
-    supervision = no_polling_supervision()
-    settled = run_runtime(
-        {
-            "action": "no_polling_terminal_settlement",
-            "supervision": supervision,
-            "event": {
-                "agentId": "pimux-worker-001",
-                "eventId": "evt-closeout-1",
-                "timestamp": "2026-04-17T10:03:00Z",
-            },
-        }
-    )
+    settled = settled_no_polling_supervision()
     allowed_status = run_runtime(
         {
             "action": "evaluate_no_polling_supervision",
@@ -1197,3 +1201,77 @@ def test_no_polling_supervision_allows_one_final_status_or_activity_after_termin
         }
     )
     assert allowed_after_supervision == {"allow": True}
+
+
+def test_no_polling_settlement_pending_does_not_pretool_block_spawn() -> None:
+    """Spawn must reach the executor so it can return a structured suppressed result."""
+    settled = settled_no_polling_supervision()
+    decision = run_runtime(
+        {
+            "action": "evaluate_no_polling_supervision",
+            "supervision": settled,
+            "event": {"toolName": "pimux", "input": {"action": "spawn", "agentId": "pimux-repro-new"}},
+            "now": "2026-04-17T10:04:00Z",
+        }
+    )
+    assert decision == {"allow": True}
+
+
+def test_no_polling_settlement_pending_wrong_target_verification_is_blocked_with_related_id() -> None:
+    """Final settlement verification should be scoped to the pending child."""
+    settled = settled_no_polling_supervision()
+    blocked_activity = run_runtime(
+        {
+            "action": "evaluate_no_polling_supervision",
+            "supervision": settled,
+            "event": {"toolName": "pimux", "input": {"action": "activity", "target": "pimux-repro-new"}},
+            "now": "2026-04-17T10:04:00Z",
+        }
+    )
+    assert blocked_activity["allow"] is False
+    assert "pimux-worker-001" in blocked_activity["reason"]
+    assert "pimux-repro-new" in blocked_activity["reason"]
+
+    blocked_list = run_runtime(
+        {
+            "action": "evaluate_no_polling_supervision",
+            "supervision": settled,
+            "event": {"toolName": "pimux", "input": {"action": "list"}},
+            "now": "2026-04-17T10:04:00Z",
+        }
+    )
+    assert blocked_list["allow"] is False
+    assert "pimux-worker-001" in blocked_list["reason"]
+
+
+def test_no_polling_final_verification_clears_only_for_related_agent() -> None:
+    """A successful final status/activity result for another agent must not settle this child."""
+    settled = settled_no_polling_supervision()
+    after_wrong_agent = run_runtime(
+        {
+            "action": "no_polling_tool_result",
+            "supervision": settled,
+            "event": {
+                "toolName": "pimux",
+                "details": {"action": "status", "status": {"record": {"agentId": "pimux-repro-new"}}},
+                "isError": False,
+            },
+            "now": "2026-04-17T10:03:05Z",
+        }
+    )
+    assert after_wrong_agent["active"] is True
+    assert after_wrong_agent["settlementVerificationPending"] is True
+
+    after_related_agent = run_runtime(
+        {
+            "action": "no_polling_tool_result",
+            "supervision": settled,
+            "event": {
+                "toolName": "pimux",
+                "details": {"action": "activity", "status": {"record": {"agentId": "pimux-worker-001"}}},
+                "isError": False,
+            },
+            "now": "2026-04-17T10:03:05Z",
+        }
+    )
+    assert after_related_agent["active"] is False

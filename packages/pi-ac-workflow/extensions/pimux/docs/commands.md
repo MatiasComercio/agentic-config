@@ -83,6 +83,8 @@ Parent-side interface delivery should also show parent -> child bridge messages 
 
 After a terminal `report_parent`, pimux first records `terminal_report_received`, finalizes the managed session, then reports a settled state only after exit evidence exists. If exit evidence does not arrive before timeout, status/activity surface `terminal_report_exit_timeout` with recovery guidance. Terminal settlement notifications remain retryable until the parent delivery queue records delivery.
 
+If a new `spawn` is attempted while terminal settlement verification is pending, pimux fails closed with an explicit `Spawn suppressed` result that names the pending related child instead of creating an ambiguous second child.
+
 ## Inspection
 
 - `list` for current-session agents by default

@@ -80,7 +80,7 @@ For explicit mux-family wrappers, the notify-first default is stricter:
 - treat `status`, `activity`, `capture`, `tree`, `list`, and `open` as recovery-only tools for suspected stall/protocol violation/failure or the inactivity-only watchdog; `open` is also allowed for explicit user live-inspection requests
 - use `activity` when deterministic bridge/process state is enough and pane capture is unnecessary
 - use `ping_agent` only as a neutral active recovery probe; the child must answer the `status_request` with `progress` if still working or a terminal report only if quality-gated completion/blocker/failure is real
-- after terminal settlement, use one final `pimux status` or `pimux activity` check before advancing
+- after terminal settlement, use one final `pimux status` or `pimux activity` check for the pending child before advancing or dispatching another child
 
 Do not poll pimux or use Bash sleep/wait loops; wait for delivered child activity. One targeted `status` / `capture` check at a real recovery decision point is fine. Continuous polling is not. Do not nudge children toward closeout; quality, accuracy, and prompt/spec fidelity outrank speed.
 

@@ -485,6 +485,39 @@ function isSettlementVerificationAction(action: string): boolean {
 	return SETTLEMENT_VERIFICATION_ACTIONS.has(action);
 }
 
+function isSpawnAction(action: string): boolean {
+	return action === "spawn";
+}
+
+function getStringInputValue(input: Record<string, unknown> | undefined, key: string): string | undefined {
+	const value = input?.[key];
+	return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function getPimuxRequestedTarget(action: string, input: Record<string, unknown> | undefined): string | undefined {
+	return getStringInputValue(input, "target") ?? (isSpawnAction(action) ? getStringInputValue(input, "agentId") : undefined);
+}
+
+function getToolResultAgentId(details: Record<string, unknown> | undefined): string | undefined {
+	const status = details?.status;
+	if (!status || typeof status !== "object") return undefined;
+	const record = (status as { record?: unknown }).record;
+	if (!record || typeof record !== "object") return undefined;
+	const agentId = (record as { agentId?: unknown }).agentId;
+	return typeof agentId === "string" && agentId.trim() ? agentId.trim() : undefined;
+}
+
+function isPendingSettlementVerificationTarget(supervision: Pick<NoPollingSupervisionState, "lastSpawnedAgentId">, requestedTarget: string | undefined): boolean {
+	if (!requestedTarget || requestedTarget === "last") return true;
+	return Boolean(supervision.lastSpawnedAgentId) && requestedTarget === supervision.lastSpawnedAgentId;
+}
+
+function buildSettlementPendingDetail(supervision: Pick<NoPollingSupervisionState, "lastSpawnedAgentId">, action: string, requestedTarget?: string): string {
+	const relatedAgentId = supervision.lastSpawnedAgentId ?? "unknown";
+	const requested = requestedTarget ? ` Requested target: ${requestedTarget}.` : "";
+	return `Terminal settlement is ready for ${relatedAgentId}. Use one final pimux status or activity check for ${relatedAgentId}, then stop supervising this child before ${action}.${requested}`;
+}
+
 function isTrackedDirectChild(lock: ControlPlaneLockState, agentId?: string): boolean {
 	return !lock.lastSpawnedAgentId || !agentId || lock.lastSpawnedAgentId === agentId;
 }
@@ -627,14 +660,16 @@ export function evaluateNoPollingSupervisionToolCall(
 	if (isPimuxTool(event.toolName)) {
 		const action = String(event.input?.action ?? "").trim();
 		if (!action) return { allow: true };
+		const requestedTarget = getPimuxRequestedTarget(action, event.input);
+		if (isSpawnAction(action)) return { allow: true };
+		if (supervision.settlementVerificationPending) {
+			if (isSettlementVerificationAction(action) && isPendingSettlementVerificationTarget(supervision, requestedTarget)) return { allow: true };
+			return buildNoPollingReason(buildSettlementPendingDetail(supervision, action, requestedTarget));
+		}
 		if (isExplicitOpenAction(action, context)) return { allow: true };
 		if (isExplicitPassiveInspectionAction(action, context)) return { allow: true };
 		if (isExplicitChildInstructionAction(action, context)) return { allow: true };
 		if (isExplicitChildProbeAction(action, context)) return { allow: true };
-		if (supervision.settlementVerificationPending && isSettlementVerificationAction(action)) return { allow: true };
-		if (supervision.settlementVerificationPending) {
-			return buildNoPollingReason("Terminal settlement is ready. Use one final pimux status or activity check, then stop supervising this child.");
-		}
 		if (isSupervisionCheckAction(action)) {
 			if (isInactivityWatchdogReached(supervision, now)) return { allow: true };
 			return buildNoPollingReason(
@@ -785,9 +820,11 @@ export function updateNoPollingSupervisionForToolResult(
 ): NoPollingSupervisionState | undefined {
 	if (!supervision?.active || !isPimuxTool(event.toolName)) return supervision;
 	const action = String(event.details?.action ?? "").trim();
-	if (!action || event.isError || typeof event.details?.error === "string") return supervision;
+	if (!action || event.isError || typeof event.details?.error === "string" || event.details?.suppressed === true) return supervision;
 	const occurredAt = resolveNowIso(now);
 	if (supervision.settlementVerificationPending && isSettlementVerificationAction(action)) {
+		const verifiedAgentId = getToolResultAgentId(event.details);
+		if (verifiedAgentId && supervision.lastSpawnedAgentId && verifiedAgentId !== supervision.lastSpawnedAgentId) return supervision;
 		return {
 			...supervision,
 			active: false,
@@ -831,7 +868,7 @@ export function updateControlPlaneLockForToolResult(
 	if (!isPimuxTool(event.toolName)) return lock;
 	const action = String(event.details?.action ?? "").trim();
 	if (!action) return lock;
-	if (event.isError || typeof event.details?.error === "string") return lock;
+	if (event.isError || typeof event.details?.error === "string" || event.details?.suppressed === true) return lock;
 
 	const occurredAt = resolveNowIso(now);
 	if (action === "spawn") {

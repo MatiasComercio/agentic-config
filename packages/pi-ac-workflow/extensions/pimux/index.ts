@@ -1214,6 +1214,28 @@ function buildToolResult(text: string, details: Record<string, unknown>) {
 	};
 }
 
+function buildSpawnSuppression(
+	request: { agentId?: string },
+	supervision: NoPollingSupervisionState | undefined,
+): { text: string; details: Record<string, unknown> } | undefined {
+	if (!supervision?.active || supervision.settlementVerificationPending !== true) return undefined;
+	const requestedAgentId = request.agentId?.trim() || undefined;
+	const relatedAgentId = supervision.lastSpawnedAgentId;
+	const relatedLabel = relatedAgentId ?? "unknown";
+	const requested = requestedAgentId ? ` Requested agent: ${requestedAgentId}.` : "";
+	const details: Record<string, unknown> = {
+		action: "spawn",
+		suppressed: true,
+		reason: "terminal_settlement_verification_pending",
+	};
+	if (requestedAgentId) details.requestedAgentId = requestedAgentId;
+	if (relatedAgentId) details.relatedAgentId = relatedAgentId;
+	return {
+		text: `Spawn suppressed: terminal settlement verification is pending for ${relatedLabel}. Use pimux status or activity for ${relatedLabel} before dispatching another child.${requested}`,
+		details,
+	};
+}
+
 const CONTROL_PLANE_ACTIVE_TOOLS = ["pimux", "AskUserQuestion", "say"];
 const NO_POLLING_SPAWN_ECHO = "NO-POLL: do not poll pimux or use Bash sleep/wait loops; wait for delivered child activity.";
 const PARENT_DELIVERY_DEBOUNCE_MS = 75;
@@ -2013,7 +2035,14 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 
 		switch (subcommand) {
 			case "spawn": {
-				const record = await spawnManagedAgent(buildSpawnRequest(parsed, ctx), ctx);
+				const request = buildSpawnRequest(parsed, ctx);
+				const suppression = buildSpawnSuppression(request, noPollingSupervision);
+				if (suppression) {
+					if (ctx.hasUI) ctx.ui.notify(suppression.text, "warning");
+					else console.log(suppression.text);
+					return;
+				}
+				const record = await spawnManagedAgent(request, ctx);
 				const opened = record.visualMode === "iterm-opened";
 				const summary = `Spawned ${record.agentId} (${record.role ?? "worker"}, ${opened ? "opened in iTerm" : "headless"}). ${NO_POLLING_SPAWN_ECHO}`;
 				if (ctx.hasUI) ctx.ui.notify(summary, "info");
@@ -2446,23 +2475,24 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 			try {
 				switch (params.action) {
 					case "spawn": {
-						if (!params.prompt?.trim()) throw new Error("spawn requires prompt");
-						const record = await spawnManagedAgent(
-							{
-								agentId: params.agentId,
-								cwd: params.cwd ?? ctx.cwd,
-								model: params.model,
-								thinking: params.thinking,
-								prompt: params.prompt,
-								role: params.role,
-								goal: params.goal,
-								parentAgentId: params.parentAgentId,
-								rootAgentId: params.rootAgentId,
-								openIterm: params.openIterm,
-								contextBrief: params.contextBrief,
-							},
-							ctx,
-						);
+						const prompt = params.prompt;
+						if (!prompt?.trim()) throw new Error("spawn requires prompt");
+						const request: SpawnRequest = {
+							agentId: params.agentId,
+							cwd: params.cwd ?? ctx.cwd,
+							model: params.model,
+							thinking: params.thinking,
+							prompt,
+							role: params.role,
+							goal: params.goal,
+							parentAgentId: params.parentAgentId,
+							rootAgentId: params.rootAgentId,
+							openIterm: params.openIterm,
+							contextBrief: params.contextBrief,
+						};
+						const suppression = buildSpawnSuppression(request, noPollingSupervision);
+						if (suppression) return buildToolResult(suppression.text, suppression.details);
+						const record = await spawnManagedAgent(request, ctx);
 						return buildToolResult(`Spawned ${record.agentId} (${record.visualMode === "iterm-opened" ? "opened in iTerm" : "headless"}). ${NO_POLLING_SPAWN_ECHO}`, { action: params.action, agent: record });
 					}
 					case "open": {
