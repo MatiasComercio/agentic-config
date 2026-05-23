@@ -94,6 +94,11 @@ if (payload.action === "is_explicit_live_inspection") {
   process.exit(0);
 }
 
+if (payload.action === "is_explicit_child_instruction") {
+  writeJson(runtime.isExplicitChildInstructionRequest(payload.text));
+  process.exit(0);
+}
+
 throw new Error(`Unsupported action: ${payload.action}`);
 """.strip()
 
@@ -701,6 +706,16 @@ def test_explicit_live_inspection_detection_is_conservative() -> None:
 
 
 
+def test_explicit_child_instruction_detection_includes_followups() -> None:
+    """User-directed follow-ups should count as child instructions without allowing vague nudges."""
+    assert run_runtime({"action": "is_explicit_child_instruction", "text": "send the child a note"}) is True
+    assert run_runtime({"action": "is_explicit_child_instruction", "text": "follow up with the child"}) is True
+    assert run_runtime({"action": "is_explicit_child_instruction", "text": "send them this follow-up"}) is True
+    assert run_runtime({"action": "is_explicit_child_instruction", "text": "continue"}) is False
+    assert run_runtime({"action": "is_explicit_child_instruction", "text": "any update?"}) is False
+
+
+
 def test_post_spawn_blocks_recovery_message_before_child_activity() -> None:
     """The parent should not message a child unless the child asks or the user explicitly instructs."""
     post_spawn = spawn_post_lock()
@@ -1063,6 +1078,17 @@ def test_no_polling_supervision_blocks_nudges_until_child_requests_input() -> No
         "allow": False,
         "reason": "pimux no-polling supervision is active. Child did not request input. Wait; do not nudge toward closeout.",
     }
+
+    user_directed_message = run_runtime(
+        {
+            "action": "evaluate_no_polling_supervision",
+            "supervision": supervision,
+            "event": {"toolName": "pimux", "input": {"action": "send_message", "target": "pimux-worker-001", "message": "Use the explicit path."}},
+            "context": {"explicitChildInstructionRequested": True},
+            "now": "2026-04-17T10:01:00Z",
+        }
+    )
+    assert user_directed_message == {"allow": True}
 
     needs_answer = run_runtime(
         {

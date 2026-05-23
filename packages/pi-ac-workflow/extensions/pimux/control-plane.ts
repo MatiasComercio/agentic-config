@@ -633,7 +633,7 @@ export function isExplicitLiveInspectionRequest(text: string | undefined): boole
 
 export function isExplicitChildInstructionRequest(text: string | undefined): boolean {
 	const value = String(text ?? "").toLowerCase();
-	return /\b(send|tell|ask|message|instruct|reply|answer)\b/.test(value)
+	return (/\b(send|tell|ask|message|instruct|reply|answer)\b/.test(value) || /\bfollow(?:[\s-]?up)s?\b/.test(value))
 		&& /\b(child|agent|worker|pimux|them|it)\b/.test(value);
 }
 
