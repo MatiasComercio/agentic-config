@@ -4,6 +4,8 @@ All notable changes to agentic-config.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-05-25
+
 ### Added
 
 - Project config: add `.pi/pimux.yaml` defaults for pimux agent dispatch.
