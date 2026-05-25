@@ -6,6 +6,7 @@ All notable changes to agentic-config.
 
 ### Added
 
+- `pi-ac-safety`: add destructive-bash coverage for IaC/resource changes, privilege escalation, team-visible GitHub/Git operations, and generic `gh api` write prompts.
 - `pi-ac-workflow`: add explicit `--thinking` effort support to `pimux spawn` and forward it to spawned Pi children.
 - `ac-workflow`: allow explicit MUX deactivation to stand down skill-scoped Bash guards for diagnostics until the next session starts.
 - Canonical generator: add Claude skill compatibility aliases under `skills/<plugin>/<skill>/SKILL.md` so plugin-qualified skill paths resolve for every generated `ac-*` skill.
