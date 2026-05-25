@@ -47,9 +47,10 @@ def _make_test(name: str, command: str, expected: str) -> "Callable[[], TestResu
             r.mark_fail(str(e))
             raise
         return r
-    # Strip leading "Blocks "/"Allows " so __name__ doesn't double up (e.g. test_blocks_blocks_...)
-    slug = re.sub(r"^(?:Blocks|Allows)\s+", "", name).lower().replace(" ", "_")
-    test_fn.__name__ = f"test_{'blocks' if expected == 'deny' else 'allows'}_{slug}"
+    # Strip leading verb so __name__ doesn't double up (e.g. test_blocks_blocks_...)
+    slug = re.sub(r"^(?:Blocks|Allows|Asks)\s+", "", name).lower().replace(" ", "_")
+    prefix = {"deny": "blocks", "ask": "asks"}.get(expected, "allows")
+    test_fn.__name__ = f"test_{prefix}_{slug}"
     return test_fn
 
 
@@ -336,7 +337,7 @@ test_allows_summary_command = _make_test("Allows grep suspend (su substring)", "
 test_allows_result_command = _make_test("Allows result var (su substring)", "result=success && echo $result", "allow")
 
 # ===========================================================================
-# external-visibility (default: allow)
+# external-visibility (default: allow) / github-api-write (default: ask)
 # ===========================================================================
 
 test_allows_git_push_default = _make_test("Allows git push (default: allow)", "git push origin main", "allow")
@@ -353,15 +354,18 @@ test_allows_gh_repo_clone = _make_test("Allows gh repo clone (read-only, no matc
 test_allows_gh_pr_checkout_default = _make_test("Allows gh pr checkout (read-only, no match)", "gh pr checkout 123", "allow")
 test_allows_gh_label_create_default = _make_test("Allows gh label create (default: allow)", 'gh label create "bug" --color FF0000', "allow")
 test_allows_gh_variable_set_default = _make_test("Allows gh variable set (default: allow)", "gh variable set MY_VAR --body value", "allow")
-test_allows_gh_api_post_default = _make_test("Allows gh api -X POST (default: allow)", "gh api -X POST /repos/owner/repo/issues --field title=test", "allow")
+test_asks_gh_api_post_default = _make_test("Asks gh api -X POST (default: ask)", "gh api -X POST /repos/owner/repo/issues --field title=test", "ask")
+test_asks_gh_api_put_default = _make_test("Asks gh api -X PUT (default: ask)", "gh api -X PUT /repos/owner/repo/actions/permissions", "ask")
+test_asks_gh_api_delete_default = _make_test("Asks gh api -X DELETE (default: ask)", "gh api -X DELETE /repos/owner/repo/hooks/123", "ask")
+test_asks_gh_api_patch_default = _make_test("Asks gh api -X PATCH (default: ask)", "gh api -X PATCH /repos/owner/repo", "ask")
 test_allows_gh_api_get_no_match = _make_test("Allows gh api GET (no match, read-only)", "gh api /repos/owner/repo/issues", "allow")
-test_allows_gh_api_implicit_post_default = _make_test("Allows gh api implicit POST (default: allow)", "gh api /repos/owner/repo/issues --field title=test", "allow")
-test_allows_gh_api_implicit_post_f_flag = _make_test("Allows gh api -f implicit POST (default: allow)", "gh api /repos/owner/repo/issues -f title=test", "allow")
+test_asks_gh_api_implicit_post_default = _make_test("Asks gh api implicit POST (default: ask)", "gh api /repos/owner/repo/issues --field title=test", "ask")
+test_asks_gh_api_implicit_post_f_flag = _make_test("Asks gh api -f implicit POST (default: ask)", "gh api /repos/owner/repo/issues -f title=test", "ask")
 test_allows_gh_pr_review_default = _make_test("Allows gh pr review (default: allow)", "gh pr review 123 --approve", "allow")
 test_allows_gh_run_cancel_default = _make_test("Allows gh run cancel (default: allow)", "gh run cancel 12345", "allow")
 test_allows_gh_run_rerun_default = _make_test("Allows gh run rerun (default: allow)", "gh run rerun 12345", "allow")
 test_allows_gh_run_view_no_match = _make_test("Allows gh run view (read-only, no match)", "gh run view 12345", "allow")
-test_allows_gh_api_method_post_default = _make_test("Allows gh api --method POST (default: allow)", "gh api --method POST /repos/owner/repo/issues --field title=test", "allow")
+test_asks_gh_api_method_post_default = _make_test("Asks gh api --method POST (default: ask)", "gh api --method POST /repos/owner/repo/issues --field title=test", "ask")
 test_allows_gh_pr_search_no_match = _make_test("Allows gh pr search (read-only, no match)", "gh pr search --state open", "allow")
 test_allows_gh_issue_search_no_match = _make_test("Allows gh issue search (read-only, no match)", "gh issue search --label bug", "allow")
 
@@ -639,15 +643,18 @@ def main() -> None:
         test_allows_gh_pr_checkout_default,
         test_allows_gh_label_create_default,
         test_allows_gh_variable_set_default,
-        test_allows_gh_api_post_default,
+        test_asks_gh_api_post_default,
+        test_asks_gh_api_put_default,
+        test_asks_gh_api_delete_default,
+        test_asks_gh_api_patch_default,
         test_allows_gh_api_get_no_match,
-        test_allows_gh_api_implicit_post_default,
-        test_allows_gh_api_implicit_post_f_flag,
+        test_asks_gh_api_implicit_post_default,
+        test_asks_gh_api_implicit_post_f_flag,
         test_allows_gh_pr_review_default,
         test_allows_gh_run_cancel_default,
         test_allows_gh_run_rerun_default,
         test_allows_gh_run_view_no_match,
-        test_allows_gh_api_method_post_default,
+        test_asks_gh_api_method_post_default,
         test_allows_gh_pr_search_no_match,
         test_allows_gh_issue_search_no_match,
         # safe commands (regression)

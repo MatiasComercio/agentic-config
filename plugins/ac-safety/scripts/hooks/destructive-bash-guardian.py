@@ -404,9 +404,10 @@ PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
     (re.compile(r"\bgh\s+variable\s+(?!" + _GH_READ_ONLY + r")\w+"), "gh variable write operation (visible to teammates)", "external-visibility"),
     (re.compile(r"\bgh\s+environment\s+(?!" + _GH_READ_ONLY + r")\w+"), "gh environment write operation (visible to teammates)", "external-visibility"),
     (re.compile(r"\bgh\s+ruleset\s+(?!" + _GH_READ_ONLY + r")\w+"), "gh ruleset write operation (visible to teammates)", "external-visibility"),
-    (re.compile(r"\bgh\s+api\s+.*(?:-X|--method)\s*(?:POST|PUT|DELETE|PATCH)\b"), "gh api write operation (visible to teammates)", "external-visibility"),
+    # Generic gh api writes are arbitrary GitHub mutations; prompt by default.
+    (re.compile(r"\bgh\s+api\s+.*(?:-X|--method)\s*(?:POST|PUT|DELETE|PATCH)\b"), "gh api write operation (generic GitHub mutation)", "github-api-write"),
     # gh api with implicit POST: --field/-f/--raw-field triggers auto-POST when no -X is given
-    (re.compile(r"\bgh\s+api\s+(?!.*(?:-X|--method)\s).*(?:--field|--raw-field|-[fF])\s"), "gh api with field data (implicit POST, visible to teammates)", "external-visibility"),
+    (re.compile(r"\bgh\s+api\s+(?!.*(?:-X|--method)\s).*(?:--field|--raw-field|-[fF])\s"), "gh api with field data (implicit POST, generic GitHub mutation)", "github-api-write"),
     # -- docker-destruction --
     (re.compile(_BIN + r"\bdocker\s+system\s+prune\s+-a\b"), "docker system prune -a", "docker-destruction"),
     (re.compile(_BIN + r"\bdocker\s+volume\s+prune\b"), "docker volume prune", "docker-destruction"),

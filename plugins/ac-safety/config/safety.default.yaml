@@ -59,6 +59,7 @@ destructive_bash:
     credential-reads: deny
     remote-code-execution: deny
     external-visibility: allow
+    github-api-write: ask
 
 write_scope:
   categories:
