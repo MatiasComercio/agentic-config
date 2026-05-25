@@ -147,6 +147,16 @@ test_blocks_redirect_write_ssh_file = _make_test("Blocks echo hi > ~/.ssh/test",
 test_blocks_redirect_append_ssh_file = _make_test("Blocks echo hi >> ~/.ssh/test", "echo hi >> ~/.ssh/test", "deny")
 test_blocks_rm_ssh_file = _make_test("Blocks rm ~/.ssh/test", "rm ~/.ssh/test", "deny")
 test_allows_touch_project_file = _make_test("Allows touch ~/projects/myapp/test.txt", "touch ~/projects/myapp/test.txt", "allow")
+test_blocks_git_push_then_touch_ssh_file = _make_test(
+    "Blocks git push chained with protected write",
+    "git push origin main && touch ~/.ssh/test",
+    "deny",
+)
+test_blocks_gh_issue_create_then_redirect_ssh_file = _make_test(
+    "Blocks gh issue create chained with protected redirect",
+    'gh issue create --title "bug" --body "details" && echo hi > ~/.ssh/test',
+    "deny",
+)
 test_blocks_rg_aws_credentials = _make_test("Blocks rg secret ~/.aws/credentials", "rg secret ~/.aws/credentials", "deny")
 test_blocks_find_ssh_directory = _make_test("Blocks find ~/.ssh -maxdepth 1", "find ~/.ssh -maxdepth 1", "deny")
 test_blocks_ls_ssh_directory = _make_test("Blocks ls ~/.ssh", "ls ~/.ssh", "deny")
@@ -415,7 +425,7 @@ def _load_patterns() -> list:
 
 
 def test_pattern_ordering_git_destructive_before_external_visibility() -> TestResult:
-    """git-destructive patterns must all precede external-visibility (first-match semantics)."""
+    """git-destructive patterns must all precede broad external-visibility patterns."""
     r = TestResult("Ordering: git-destructive before external-visibility")
     try:
         patterns = _load_patterns()
@@ -433,7 +443,7 @@ def test_pattern_ordering_git_destructive_before_external_visibility() -> TestRe
 
 
 def test_pattern_ordering_credential_reads_before_external_visibility() -> TestResult:
-    """credential-reads patterns must all precede external-visibility (first-match semantics)."""
+    """credential-read patterns must all precede broad external-visibility patterns."""
     r = TestResult("Ordering: credential-reads before external-visibility")
     try:
         patterns = _load_patterns()
@@ -517,6 +527,8 @@ def main() -> None:
         test_blocks_redirect_append_ssh_file,
         test_blocks_rm_ssh_file,
         test_allows_touch_project_file,
+        test_blocks_git_push_then_touch_ssh_file,
+        test_blocks_gh_issue_create_then_redirect_ssh_file,
         test_blocks_rg_aws_credentials,
         test_blocks_find_ssh_directory,
         test_blocks_ls_ssh_directory,

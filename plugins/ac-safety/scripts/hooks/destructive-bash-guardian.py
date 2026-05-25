@@ -43,6 +43,7 @@ _CONTROL_TOKENS = {";", "&&", "||", "|", "&"}
 _REDIRECTION_RE = re.compile(r"(?:^|[\s;&|])(?:\d*>>?)(?![&])\s*(?P<path>'[^']+'|\"[^\"]+\"|[^\s;&|]+)")
 _TARGETING_BASH_WRITE_COMMANDS = {"touch", "rm", "mkdir", "rmdir", "tee"}
 _DESTINATION_BASH_WRITE_COMMANDS = {"cp", "mv", "install", "ln"}
+_DECISION_RANK = {"allow": 0, "ask": 1, "deny": 2}
 
 # gh CLI read-only subcommands: excluded from external-visibility blocking
 _GH_READ_ONLY = r"(?:list|view|status|checks|diff|download|checkout|search)\b"
@@ -389,9 +390,9 @@ PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
     (re.compile(_BIN + r"\bsu(\s|$)"), "su (privilege escalation)", "privilege-escalation"),
     (re.compile(_BIN + r"\bdoas(\s|$)"), "doas (privilege escalation)", "privilege-escalation"),
     # -- external-visibility --
-    # ORDERING INVARIANT: git-destructive patterns must precede external-visibility
-    # to ensure force-push detection fires first. Negative lookahead covers both
-    # --force and -f shorthand as defense-in-depth.
+    # ORDERING INVARIANT: stricter overlapping patterns precede broad
+    # external-visibility patterns. Final decisions aggregate all matches, and
+    # this order keeps same-tier reasons specific if defaults change.
     (re.compile(r"\bgit\s+push\b(?!.*(?:--force\b|-[a-eg-zA-Z]*f\b))"), "git push (visible to teammates)", "external-visibility"),
     (re.compile(r"\bgh\s+pr\s+(?!" + _GH_READ_ONLY + r")\w+"), "gh pr write operation (visible to teammates)", "external-visibility"),
     (re.compile(r"\bgh\s+issue\s+(?!" + _GH_READ_ONLY + r")\w+"), "gh issue write operation (visible to teammates)", "external-visibility"),
@@ -613,6 +614,7 @@ def _check_bash_write_scope(command: str, config: dict) -> tuple[str, str | None
     ])
     git_hooks_segment: str = ws.get("git_hooks_segment", "/.git/hooks/")
 
+    result: tuple[str, str | None] = ("allow", None)
     for path in _extract_bash_write_targets(command):
         default_decision, reason, category = _check_write_scope_path(
             path,
@@ -634,10 +636,34 @@ def _check_bash_write_scope(command: str, config: dict) -> tuple[str, str | None
             if resolve_path(path) == resolve_path("/dev/null"):
                 message += " Retry without /dev/null or use command-specific quiet flags."
             message += " Command denied by destructive-bash-guardian."
-            return "deny", message
+            result = _most_restrictive_result(result, ("deny", message))
+            continue
         if decision == "ask":
-            return "ask", reason
+            result = _most_restrictive_result(result, ("ask", reason))
 
+    return result
+
+
+def _most_restrictive_result(
+    current: tuple[str, str | None],
+    candidate: tuple[str, str | None],
+) -> tuple[str, str | None]:
+    """Return the stricter decision, preserving the first reason at a tier."""
+    if _DECISION_RANK.get(candidate[0], _DECISION_RANK["deny"]) > _DECISION_RANK.get(
+        current[0],
+        _DECISION_RANK["deny"],
+    ):
+        return candidate
+    return current
+
+
+def _destructive_bash_result(config: dict, category: str, reason: str) -> tuple[str, str | None]:
+    """Return the configured decision and formatted reason for one matched pattern."""
+    decision = get_category_decision(config, "destructive_bash", category)
+    if decision == "deny":
+        return "deny", f"BLOCKED: {reason}. Command denied by destructive-bash-guardian."
+    if decision == "ask":
+        return "ask", f"{reason} -- confirm to proceed?"
     return "allow", None
 
 
@@ -654,44 +680,36 @@ def main() -> None:
     command = tool_input.get("command", "")
     config = load_config()
     allowed_project_roots: list[str] = config.get("allowed_project_roots", ["~/projects/"])
+    result: tuple[str, str | None] = ("allow", None)
 
     if _has_hidden_dir_glob_credential_read(command):
-        decision = get_category_decision(config, "destructive_bash", "credential-reads")
-        reason = "file reader scanning wildcard hidden directory under home"
-        if decision == "deny":
-            deny(f"BLOCKED: {reason}. Command denied by destructive-bash-guardian.")
-        elif decision == "ask":
-            ask(f"{reason} -- confirm to proceed?")
-        else:
-            allow()
-        return
+        result = _most_restrictive_result(
+            result,
+            _destructive_bash_result(config, "credential-reads", "file reader scanning wildcard hidden directory under home"),
+        )
 
     for pattern, reason, category in PATTERNS:
-        if pattern.search(command):
-            # For file-destruction patterns (rm commands), check if the target
-            # is within allowed project roots. If so, allow it.
-            if category == "file-destruction" and "rm" in reason.lower():
-                targets = _extract_rm_targets(command)
-                if targets and _is_within_allowed_roots(targets, allowed_project_roots):
-                    allow()
-                    return
+        if not pattern.search(command):
+            continue
 
-            decision = get_category_decision(config, "destructive_bash", category)
-            if decision == "deny":
-                deny(f"BLOCKED: {reason}. Command denied by destructive-bash-guardian.")
-            elif decision == "ask":
-                ask(f"{reason} -- confirm to proceed?")
-            # else: allow (fall through)
-            else:
-                allow()
-            return
+        # For file-destruction patterns (rm commands), check if the target
+        # is within allowed project roots. If so, skip only this pattern and
+        # keep evaluating the rest of the command and write-scope policy.
+        if category == "file-destruction" and "rm" in reason.lower():
+            targets = _extract_rm_targets(command)
+            if targets and _is_within_allowed_roots(targets, allowed_project_roots):
+                continue
+
+        result = _most_restrictive_result(result, _destructive_bash_result(config, category, reason))
 
     write_scope_decision, write_scope_reason = _check_bash_write_scope(command, config)
-    if write_scope_decision == "deny":
-        deny(write_scope_reason or "BLOCKED: bash write denied by destructive-bash-guardian.")
+    result = _most_restrictive_result(result, (write_scope_decision, write_scope_reason))
+
+    if result[0] == "deny":
+        deny(result[1] or "BLOCKED: bash command denied by destructive-bash-guardian.")
         return
-    if write_scope_decision == "ask":
-        ask(write_scope_reason or "bash write targets a sensitive path -- confirm to proceed?")
+    if result[0] == "ask":
+        ask(result[1] or "bash command requires confirmation by destructive-bash-guardian.")
         return
 
     allow()
