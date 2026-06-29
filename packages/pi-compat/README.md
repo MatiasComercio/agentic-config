@@ -7,7 +7,7 @@
 
 ## Upstream Pi attribution
 
-This package provides agentic-config compatibility helpers for packages that install into upstream Pi. It is not an upstream Pi package. Upstream Pi is referenced at [pi.dev](https://pi.dev), [badlogic/pi-mono](https://github.com/badlogic/pi-mono), and the public npm packages such as [`@mariozechner/pi-coding-agent`](https://www.npmjs.com/package/@mariozechner/pi-coding-agent).
+This package provides agentic-config compatibility helpers for packages that install into upstream Pi. It is not an upstream Pi package. Upstream Pi is referenced at [pi.dev](https://pi.dev), [earendil-works/pi](https://github.com/earendil-works/pi), and the public npm packages such as [`@earendil-works/pi-coding-agent`](https://www.npmjs.com/package/@earendil-works/pi-coding-agent).
 
 See [Upstream Pi attribution](../../docs/upstream-pi-attribution.md) for the ownership boundary between upstream Pi runtime behavior and agentic-config package behavior.
 

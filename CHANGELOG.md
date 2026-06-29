@@ -4,6 +4,10 @@ All notable changes to agentic-config.
 
 ## [Unreleased]
 
+### Changed
+
+- Pi package imports and attribution now target the current `@earendil-works/*` upstream packages and `typebox` peer dependency.
+
 ## [0.3.1] - 2026-05-25
 
 ### Added

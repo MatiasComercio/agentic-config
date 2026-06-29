@@ -1,5 +1,5 @@
-import { StringEnum } from "@mariozechner/pi-ai";
-import { Type } from "@sinclair/typebox";
+import { StringEnum } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { THINKING_EFFORT_LEVELS } from "./paths.ts";
 
 export const PIMUX_PARAMS = Type.Object({

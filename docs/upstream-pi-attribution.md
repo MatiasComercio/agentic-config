@@ -7,11 +7,11 @@ agentic-config ships third-party Pi packages, skills, and extensions. Pi itself 
 | Surface | Reference | License |
 |---------|-----------|---------|
 | Pi project website | <https://pi.dev> | MIT for the public upstream packages referenced here |
-| Pi monorepo | <https://github.com/badlogic/pi-mono> | MIT |
-| Pi coding agent npm package | <https://www.npmjs.com/package/@mariozechner/pi-coding-agent> | MIT |
-| Pi coding agent source package | <https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent> | MIT |
-| Pi AI npm package | <https://www.npmjs.com/package/@mariozechner/pi-ai> | MIT |
-| Pi AI source package | <https://github.com/badlogic/pi-mono/tree/main/packages/ai> | MIT |
+| Pi monorepo | <https://github.com/earendil-works/pi> | MIT |
+| Pi coding agent npm package | <https://www.npmjs.com/package/@earendil-works/pi-coding-agent> | MIT |
+| Pi coding agent source package | <https://github.com/earendil-works/pi/tree/main/packages/coding-agent> | MIT |
+| Pi AI npm package | <https://www.npmjs.com/package/@earendil-works/pi-ai> | MIT |
+| Pi AI source package | <https://github.com/earendil-works/pi/tree/main/packages/ai> | MIT |
 
 The upstream package names are listed as their public npm identifiers because agentic-config imports those packages directly in its Pi extension packages. The MIT license entries above are taken from the public package metadata for the referenced upstream packages.
 
@@ -38,8 +38,8 @@ If this repository starts copying or bundling upstream Pi source files or assets
 
 The current package set imports upstream Pi APIs directly from:
 
-- `@mariozechner/pi-coding-agent`
-- `@mariozechner/pi-ai`
+- `@earendil-works/pi-coding-agent`
+- `@earendil-works/pi-ai`
 
 Those direct imports are currently used by `@agentic-config/pi-ac-tools` and `@agentic-config/pi-ac-workflow`. Other package roots install into Pi through package manifests, skills, bundled assets, and shared compatibility wiring.
 
@@ -49,4 +49,4 @@ When documenting Pi support in this repository:
 
 - Attribute Pi runtime behavior to upstream Pi and link to this page when the distinction matters.
 - Attribute `@agentic-config/pi-*`, `pimux`, `hook-compat`, generated skills, and workflow wrappers to agentic-config.
-- Avoid wording that suggests agentic-config owns the Pi CLI, Pi monorepo, or upstream `@mariozechner/*` packages.
+- Avoid wording that suggests agentic-config owns the Pi CLI, Pi monorepo, or upstream `@earendil-works/*` packages.
