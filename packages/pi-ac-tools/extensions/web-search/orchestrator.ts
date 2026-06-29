@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getBraveAuthStatus } from "./auth.js";
 import { AdapterUnavailableError, formatErrorMessage } from "./errors.js";
 import { loadDefaultBackend } from "./preferences.js";

@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { AdapterUnavailableError, BackendExecutionError, ParseError, formatErrorMessage } from "../errors.js";
 import { normalizeResultShape, parseJsonObjectFromText, stripAnsi, truncateText } from "../normalize.js";
 import { buildDelegatePrompt } from "../prompt-builders.js";

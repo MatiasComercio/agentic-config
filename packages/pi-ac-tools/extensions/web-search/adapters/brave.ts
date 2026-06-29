@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveBraveApiKey, missingBraveKeySetupHint } from "../auth.js";
 import { AdapterUnavailableError, BackendExecutionError, ParseError, formatErrorMessage } from "../errors.js";
 import { normalizeResultShape } from "../normalize.js";

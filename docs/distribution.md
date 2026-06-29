@@ -99,7 +99,7 @@ One `.claude/settings.json` commit replaces per-member setup instructions.
 
 ## Pi Package Distribution
 
-Pi package sources generally support npm, git, and local paths. Pi itself is maintained upstream at [pi.dev](https://pi.dev) and [badlogic/pi-mono](https://github.com/badlogic/pi-mono). The packages in this repository are agentic-config packages that install into upstream Pi; they do not define the Pi CLI or core runtime. See [Upstream Pi attribution](upstream-pi-attribution.md) for the source links and package ownership boundary.
+Pi package sources generally support npm, git, and local paths. Pi itself is maintained upstream at [pi.dev](https://pi.dev) and [earendil-works/pi](https://github.com/earendil-works/pi). The packages in this repository are agentic-config packages that install into upstream Pi; they do not define the Pi CLI or core runtime. See [Upstream Pi attribution](upstream-pi-attribution.md) for the source links and package ownership boundary.
 
 For the current `agentic-config` monorepo package layout:
 - git-tag installs of the validated root umbrella package are the primary team and automation path

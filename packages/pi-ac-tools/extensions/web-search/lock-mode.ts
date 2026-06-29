@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { LockState, RuntimeState } from "./types.js";
 
 const LOCK_ENTRY_TYPE = "web-search-lock";

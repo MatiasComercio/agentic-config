@@ -4,12 +4,12 @@ This directory contains the current pi package surface for `agentic-config`.
 
 ## Upstream Pi dependency and attribution
 
-Pi is maintained upstream at [pi.dev](https://pi.dev) and [badlogic/pi-mono](https://github.com/badlogic/pi-mono). The packages in this directory are third-party agentic-config packages that install into upstream Pi through `pi install`.
+Pi is maintained upstream at [pi.dev](https://pi.dev) and [earendil-works/pi](https://github.com/earendil-works/pi). The packages in this directory are third-party agentic-config packages that install into upstream Pi through `pi install`.
 
 Direct upstream API imports currently use:
 
-- [`@mariozechner/pi-coding-agent`](https://www.npmjs.com/package/@mariozechner/pi-coding-agent), with source under [`packages/coding-agent`](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent)
-- [`@mariozechner/pi-ai`](https://www.npmjs.com/package/@mariozechner/pi-ai), with source under [`packages/ai`](https://github.com/badlogic/pi-mono/tree/main/packages/ai)
+- [`@earendil-works/pi-coding-agent`](https://www.npmjs.com/package/@earendil-works/pi-coding-agent), with source under [`packages/coding-agent`](https://github.com/earendil-works/pi/tree/main/packages/coding-agent)
+- [`@earendil-works/pi-ai`](https://www.npmjs.com/package/@earendil-works/pi-ai), with source under [`packages/ai`](https://github.com/earendil-works/pi/tree/main/packages/ai)
 
 See [docs/upstream-pi-attribution.md](../docs/upstream-pi-attribution.md) for the ownership boundary. In short: upstream Pi owns the CLI, package loader, extension API, and core runtime; agentic-config owns the `@agentic-config/pi-*` packages, generated skills, compatibility layers, package-local extensions, and `pimux` workflow runtime shipped here.
 

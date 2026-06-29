@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { formatBraveAuthStatus, getBraveAuthStatus } from "./auth.js";
 import { BRAVE_MONTHLY_LIMIT, getBackendAttemptOrder } from "./types.js";
 import type { RuntimeState } from "./types.js";

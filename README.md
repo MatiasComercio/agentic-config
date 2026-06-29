@@ -55,7 +55,7 @@ For teams, prefer a committed `.pi/settings.json` pinned to a release tag. For l
 
 ### Upstream Pi attribution
 
-agentic-config ships third-party packages for Pi. Pi itself, including the CLI, package loader, extension API, and runtime, is maintained upstream at [pi.dev](https://pi.dev) and [badlogic/pi-mono](https://github.com/badlogic/pi-mono). The package surface here imports upstream Pi APIs such as [`@mariozechner/pi-coding-agent`](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) and [`@mariozechner/pi-ai`](https://www.npmjs.com/package/@mariozechner/pi-ai) where needed.
+agentic-config ships third-party packages for Pi. Pi itself, including the CLI, package loader, extension API, and runtime, is maintained upstream at [pi.dev](https://pi.dev) and [earendil-works/pi](https://github.com/earendil-works/pi). The package surface here imports upstream Pi APIs such as [`@earendil-works/pi-coding-agent`](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) and [`@earendil-works/pi-ai`](https://www.npmjs.com/package/@earendil-works/pi-ai) where needed.
 
 See [Upstream Pi attribution](docs/upstream-pi-attribution.md) for source links and the runtime ownership boundary.
 

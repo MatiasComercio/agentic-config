@@ -1,7 +1,7 @@
 import { promises as fs, watch as watchFs } from "node:fs";
 import type { FSWatcher } from "node:fs";
 import * as path from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	appendBridgeEvent,
 	buildBridgeSessionEntry,

@@ -8,7 +8,7 @@
 
 ## Upstream Pi attribution
 
-This package aggregates agentic-config packages that install into upstream Pi. It does not provide or replace the upstream Pi CLI, package loader, extension API, or core runtime. See [Upstream Pi attribution](../../docs/upstream-pi-attribution.md) for links to [pi.dev](https://pi.dev), [badlogic/pi-mono](https://github.com/badlogic/pi-mono), and the upstream npm packages used by this repository.
+This package aggregates agentic-config packages that install into upstream Pi. It does not provide or replace the upstream Pi CLI, package loader, extension API, or core runtime. See [Upstream Pi attribution](../../docs/upstream-pi-attribution.md) for links to [pi.dev](https://pi.dev), [earendil-works/pi](https://github.com/earendil-works/pi), and the upstream npm packages used by this repository.
 
 ## What this package aggregates today
 `@agentic-config/pi-all` is the one-shot install surface for the current shipped pi package set.

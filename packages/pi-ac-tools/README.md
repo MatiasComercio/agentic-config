@@ -29,7 +29,7 @@
 
 ## Upstream Pi attribution
 
-This package installs into upstream Pi and uses upstream Pi APIs for its package-local extensions. Direct imports include [`@mariozechner/pi-coding-agent`](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) and [`@mariozechner/pi-ai`](https://www.npmjs.com/package/@mariozechner/pi-ai), whose source lives in [badlogic/pi-mono](https://github.com/badlogic/pi-mono).
+This package installs into upstream Pi and uses upstream Pi APIs for its package-local extensions. Direct imports include [`@earendil-works/pi-coding-agent`](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) and [`@earendil-works/pi-ai`](https://www.npmjs.com/package/@earendil-works/pi-ai), whose source lives in [earendil-works/pi](https://github.com/earendil-works/pi).
 
 The `say` and `web-search` extensions are agentic-config package extensions. They are not upstream Pi features. See [Upstream Pi attribution](../../docs/upstream-pi-attribution.md) for the full boundary.
 
