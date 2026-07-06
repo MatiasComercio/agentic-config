@@ -35,7 +35,7 @@ Implications:
 After a terminal child report, the pimux runtime finalizes the managed session promptly instead of leaving the child alive in an ambiguous post-closeout state.
 The child should not keep chatting or continue work after emitting a terminal report.
 `terminal_report_received` and `terminal_report_exit_timeout` are not settled success states; supervisors must wait for exit evidence or recover explicitly.
-Terminal settlement notification is durable parent-delivery work: bursty terminal reports may be batched, and a terminal notification remains retryable until the parent delivery queue records delivery metadata for that bridge.
+Terminal settlement notification is durable parent-delivery work: bursty terminal reports may be batched, and a terminal notification remains retryable until the parent delivery queue records delivery metadata for that bridge. Delivered terminal identities are idempotent: the same child `agentId` + settled state + terminal event id is surfaced to the parent at most once, and prune or bridge cleanup invalidates stale queued terminal deliveries instead of re-emitting them as fresh parent input.
 
 ## Nested orchestrator rule
 

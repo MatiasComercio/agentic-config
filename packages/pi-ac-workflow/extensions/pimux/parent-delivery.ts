@@ -9,19 +9,39 @@ export interface QueuedParentDelivery {
 	content: string;
 	triggerTurn: boolean;
 	eventIds: string[];
+	agentId?: string;
+	reportPath?: string;
+	terminalDeliveryKey?: string;
 	terminalEventId?: string;
 	settledState?: SettledTerminalState;
+	protocolViolationReason?: string;
 	createdAt: string;
 }
 
+export interface TerminalDeliveryIdentityInput {
+	bridgeDir: string;
+	agentId?: string;
+	settledState: SettledTerminalState;
+	terminalEventId?: string;
+	reportPath?: string;
+	protocolViolationReason?: string;
+}
+
 export interface TerminalNotificationState {
+	deliveredEventIds?: string[];
 	terminalNotificationDeliveredAt?: string;
+	terminalDeliveryKey?: string;
+	terminalAgentId?: string;
+	terminalReportPath?: string;
 	terminalState?: BridgeSettlementState;
 	terminalEventId?: string;
 	protocolViolationReason?: string;
 }
 
 export interface TerminalNotificationIdentity {
+	terminalDeliveryKey?: string;
+	terminalAgentId?: string;
+	terminalReportPath?: string;
 	terminalState: SettledTerminalState;
 	terminalEventId?: string;
 	protocolViolationReason?: string;
@@ -40,6 +60,7 @@ export interface ParentDeliveryFlushOptions<TDelivery extends QueuedParentDelive
 	makeBatchId: () => string;
 	updateTerminalNotificationState: (deliveries: TDelivery[], batchId: string, phase: "queued" | "delivered") => Promise<void>;
 	sendParentMessage: (batchId: string, deliveries: TDelivery[]) => void;
+	markTerminalDeliveriesSent?: (deliveries: TDelivery[]) => void;
 	markParentDeliveriesDelivered: (deliveries: TDelivery[]) => Promise<void>;
 	scheduleRetry: () => void;
 }
@@ -58,12 +79,40 @@ export function shouldSendStatusRequestProbe(
 		&& activity.activityState !== "missing_session";
 }
 
+function keyPart(value: string | undefined): string {
+	return encodeURIComponent(value?.trim() || "unknown");
+}
+
+export function buildTerminalDeliveryKey(identity: TerminalDeliveryIdentityInput): string {
+	if (identity.terminalEventId?.trim()) {
+		return [
+			"terminal",
+			identity.agentId?.trim() ? `agent=${keyPart(identity.agentId)}` : `bridge=${keyPart(identity.bridgeDir)}`,
+			`state=${keyPart(identity.settledState)}`,
+			`event=${keyPart(identity.terminalEventId)}`,
+		].join(":");
+	}
+	return [
+		"terminal",
+		`bridge=${keyPart(identity.bridgeDir)}`,
+		`agent=${keyPart(identity.agentId)}`,
+		`state=${keyPart(identity.settledState)}`,
+		`reason=${keyPart(identity.protocolViolationReason)}`,
+		`report=${keyPart(identity.reportPath)}`,
+	].join(":");
+}
+
 export function hasDeliveredTerminalNotification(
 	parentState: TerminalNotificationState,
 	identity: TerminalNotificationIdentity,
 ): boolean {
-	return Boolean(parentState.terminalNotificationDeliveredAt)
-		&& parentState.terminalState === identity.terminalState
+	const hasDeliveredMarker = Boolean(parentState.terminalNotificationDeliveredAt)
+		|| Boolean(identity.terminalEventId && parentState.deliveredEventIds?.includes(identity.terminalEventId));
+	if (!hasDeliveredMarker) return false;
+	if (identity.terminalDeliveryKey && parentState.terminalDeliveryKey) {
+		return parentState.terminalDeliveryKey === identity.terminalDeliveryKey;
+	}
+	return parentState.terminalState === identity.terminalState
 		&& parentState.terminalEventId === identity.terminalEventId
 		&& parentState.protocolViolationReason === identity.protocolViolationReason;
 }
@@ -83,15 +132,19 @@ export async function flushQueuedParentDeliveries<TDelivery extends QueuedParent
 	const deliveries = [...options.queue.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.key.localeCompare(right.key));
 	const batchId = options.makeBatchId();
 	options.queue.clear();
+	let sendCompleted = false;
 	try {
 		await options.updateTerminalNotificationState(deliveries, batchId, "queued");
 		options.sendParentMessage(batchId, deliveries);
+		sendCompleted = true;
+		options.markTerminalDeliveriesSent?.(deliveries);
 		await options.markParentDeliveriesDelivered(deliveries);
 		await options.updateTerminalNotificationState(deliveries, batchId, "delivered");
 		return { batchId, deliveries, sent: true };
 	} catch (error) {
-		for (const delivery of deliveries) options.queue.set(delivery.key, delivery);
-		options.scheduleRetry();
+		const retryableDeliveries = sendCompleted ? deliveries.filter((delivery) => !delivery.terminalDeliveryKey) : deliveries;
+		for (const delivery of retryableDeliveries) options.queue.set(delivery.key, delivery);
+		if (retryableDeliveries.length > 0) options.scheduleRetry();
 		throw error;
 	}
 }

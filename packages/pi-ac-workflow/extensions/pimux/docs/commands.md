@@ -81,7 +81,7 @@ Valid `report_parent` kinds:
 
 Parent-side interface delivery should also show parent -> child bridge messages as concise pimux events without triggering an extra turn. Use `send_message` for child-requested answers or user-directed instructions, not hurry-up nudges.
 
-After a terminal `report_parent`, pimux first records `terminal_report_received`, finalizes the managed session, then reports a settled state only after exit evidence exists. If exit evidence does not arrive before timeout, status/activity surface `terminal_report_exit_timeout` with recovery guidance. Terminal settlement notifications remain retryable until the parent delivery queue records delivery.
+After a terminal `report_parent`, pimux first records `terminal_report_received`, finalizes the managed session, then reports a settled state only after exit evidence exists. If exit evidence does not arrive before timeout, status/activity surface `terminal_report_exit_timeout` with recovery guidance. Terminal settlement notifications remain retryable until the parent delivery queue records delivery, then the terminal identity is idempotently suppressed on later scans. Prune and bridge-directory cleanup drop stale queued terminal deliveries rather than routing them to the parent again.
 
 If a new `spawn` is attempted while terminal settlement verification is pending, pimux fails closed with an explicit `Spawn suppressed` result that names the pending related child instead of creating an ambiguous second child.
 
@@ -100,7 +100,7 @@ If a new `spawn` is attempted while terminal settlement verification is pending,
 - interactive `open`, `capture`, `send`, and `kill` pickers should prefer live agents when no target is provided
 - `prune --dry-run` to preview historical cleanup candidates
 
-Auto-prune removes `terminated` or `missing` pimux registry entries aged at least `1d`; pending terminal-report states are retained for recovery.
+Auto-prune removes `terminated` or `missing` pimux registry entries aged at least `1d`; pending terminal-report states are retained for recovery. Manual or auto prune also invalidates parent-delivery queue entries and bridge watchers for pruned agents, so stale terminal events from removed bridges are not re-emitted.
 
 ## Control-plane recovery
 
