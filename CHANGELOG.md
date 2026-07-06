@@ -4,9 +4,15 @@ All notable changes to agentic-config.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-06
+
 ### Changed
 
 - Pi package imports and attribution now target the current `@earendil-works/*` upstream packages and `typebox` peer dependency.
+
+### Fixed
+
+- `pi-ac-workflow`: deduplicate stale `pimux` terminal deliveries and keep child Pi stdout attached to tmux panes so interactive TTY rendering is preserved.
 
 ## [0.3.1] - 2026-05-25
 
