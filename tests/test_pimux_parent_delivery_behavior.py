@@ -34,6 +34,10 @@ if (payload.action === "flush") {
         calls.push({ type: "send", batchId, keys: deliveries.map((delivery) => delivery.key) });
         if (payload.failSend) throw new Error("send failed");
       },
+      markTerminalDeliveriesSent: (deliveries) => {
+        const terminalDeliveryKeys = deliveries.map((delivery) => delivery.terminalDeliveryKey).filter(Boolean);
+        if (terminalDeliveryKeys.length > 0) calls.push({ type: "sent-terminal", terminalDeliveryKeys });
+      },
       markParentDeliveriesDelivered: async (deliveries) => {
         calls.push({ type: "mark", eventIds: deliveries.flatMap((delivery) => delivery.eventIds) });
         if (payload.failMark) throw new Error("mark failed");
@@ -49,6 +53,11 @@ if (payload.action === "flush") {
 
 if (payload.action === "terminal_notification") {
   writeJson(runtime.hasDeliveredTerminalNotification(payload.parentState, payload.identity));
+  process.exit(0);
+}
+
+if (payload.action === "terminal_key") {
+  writeJson(runtime.buildTerminalDeliveryKey(payload.input));
   process.exit(0);
 }
 
@@ -91,9 +100,17 @@ def run_runtime(payload: dict[str, Any]) -> Any:
     return json.loads(result.stdout)
 
 
-def delivery(key: str, *, event_ids: list[str] | None = None, created_at: str = "2026-04-17T10:00:00Z") -> dict[str, Any]:
+def delivery(
+    key: str,
+    *,
+    event_ids: list[str] | None = None,
+    created_at: str = "2026-04-17T10:00:00Z",
+    terminal_delivery_key: str | None = None,
+    settled_state: str | None = None,
+    terminal_event_id: str | None = None,
+) -> dict[str, Any]:
     """Build a synthetic queued parent delivery."""
-    return {
+    result: dict[str, Any] = {
         "key": key,
         "bridgeDir": f"/tmp/{key}",
         "launch": {"agentId": f"agent-{key}"},
@@ -102,6 +119,11 @@ def delivery(key: str, *, event_ids: list[str] | None = None, created_at: str = 
         "eventIds": event_ids or [f"evt-{key}"],
         "createdAt": created_at,
     }
+    if terminal_delivery_key:
+        result["terminalDeliveryKey"] = terminal_delivery_key
+        result["settledState"] = settled_state or "settled_failure"
+        result["terminalEventId"] = terminal_event_id or result["eventIds"][0]
+    return result
 
 
 def test_flush_requeues_deliveries_when_send_fails() -> None:
@@ -177,6 +199,96 @@ def test_terminal_notification_identity_prevents_duplicate_delivered_notificatio
             "identity": identity,
         }
     ) is False
+
+
+def test_terminal_delivery_key_prefers_child_terminal_event_identity() -> None:
+    """Stable terminal event ids should dedupe across bridge/report path churn for one child."""
+    base = {
+        "agentId": "child-a",
+        "settledState": "settled_failure",
+        "terminalEventId": "evt-terminal",
+        "bridgeDir": "/tmp/bridge-a",
+        "reportPath": "/tmp/bridge-a/reports/001-failure.md",
+    }
+    same_terminal = run_runtime(
+        {
+            "action": "terminal_key",
+            "input": {**base, "bridgeDir": "/tmp/removed-bridge", "reportPath": "/tmp/missing.md"},
+        }
+    )
+    assert run_runtime({"action": "terminal_key", "input": base}) == same_terminal
+    assert run_runtime({"action": "terminal_key", "input": {**base, "agentId": "child-b"}}) != same_terminal
+
+
+def test_terminal_notification_identity_can_use_delivery_key_or_delivered_event_id() -> None:
+    """Durable terminal keys and delivered event ids should both suppress late duplicates."""
+    identity = {
+        "terminalDeliveryKey": "terminal:agent=child-a:state=settled_failure:event=evt-terminal",
+        "terminalState": "settled_failure",
+        "terminalEventId": "evt-terminal",
+    }
+    assert run_runtime(
+        {
+            "action": "terminal_notification",
+            "parentState": {
+                "terminalNotificationDeliveredAt": "2026-04-17T10:05:00Z",
+                "terminalDeliveryKey": identity["terminalDeliveryKey"],
+            },
+            "identity": identity,
+        }
+    ) is True
+    assert run_runtime(
+        {
+            "action": "terminal_notification",
+            "parentState": {
+                "deliveredEventIds": ["evt-terminal"],
+                "terminalState": "settled_failure",
+                "terminalEventId": "evt-terminal",
+            },
+            "identity": identity,
+        }
+    ) is True
+    assert run_runtime(
+        {
+            "action": "terminal_notification",
+            "parentState": {
+                "terminalNotificationDeliveredAt": "2026-04-17T10:05:00Z",
+                "terminalDeliveryKey": identity["terminalDeliveryKey"],
+            },
+            "identity": {
+                "terminalDeliveryKey": "terminal:agent=recovery-child:state=settled_completion:event=evt-recovery",
+                "terminalState": "settled_completion",
+                "terminalEventId": "evt-recovery",
+            },
+        }
+    ) is False
+
+
+def test_flush_requeues_terminal_delivery_when_send_fails() -> None:
+    """Terminal dedupe must not suppress a delivery that was never sent."""
+    terminal = delivery(
+        "terminal-a",
+        terminal_delivery_key="terminal:agent=child-a:state=settled_failure:event=evt-terminal",
+        terminal_event_id="evt-terminal",
+    )
+    result = run_runtime({"action": "flush", "deliveries": [terminal], "failSend": True})
+    assert result["ok"] is False
+    assert result["queueKeys"] == ["terminal-a"]
+    assert [call["type"] for call in result["calls"]] == ["terminal", "send", "retry"]
+
+
+def test_flush_does_not_requeue_sent_terminal_delivery_when_ack_persistence_fails() -> None:
+    """Once parent send succeeds, terminal deliveries should not be resent because ack persistence failed."""
+    terminal = delivery(
+        "terminal-a",
+        terminal_delivery_key="terminal:agent=child-a:state=settled_failure:event=evt-terminal",
+        terminal_event_id="evt-terminal",
+    )
+    result = run_runtime({"action": "flush", "deliveries": [terminal], "failMark": True})
+    assert result["ok"] is False
+    assert result["queueKeys"] == []
+    assert [call["type"] for call in result["calls"]] == ["terminal", "send", "sent-terminal", "mark"]
+    assert result["calls"][2]["terminalDeliveryKeys"] == ["terminal:agent=child-a:state=settled_failure:event=evt-terminal"]
 
 
 def test_watchdog_notifies_once_per_quiet_window() -> None:

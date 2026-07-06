@@ -35,7 +35,8 @@ def test_parent_runtime_batches_and_retries_terminal_delivery() -> None:
     assert "terminalNotificationDeliveredAt" in bridge_text
     assert "terminalNotificationAttemptCount" in bridge_text
     assert "!notificationDelivered" in index_text
-    assert "key: `settlement:${bridgeDir}:${settlement.terminalEvent?.eventId ?? settlement.settledState}`" in index_text
+    assert "key: terminalDeliveryKey" in index_text
+    assert "terminalDeliveryKey," in index_text
     assert "const processingParentBridges = new Map<string, ParentBridgeProcessingState>();" in index_text
     assert "existing.rerunRequested = true;" in index_text
 
@@ -52,13 +53,39 @@ def test_parent_delivery_ack_happens_after_successful_send() -> None:
     assert "enqueueParentDelivery(" in deliverable_block
     assert "delivered.add(event.eventId)" not in deliverable_block
     assert "await flushQueuedParentDeliveries({" in index_text
+    assert "markTerminalDeliveriesSent: rememberDeliveredTerminalDeliveries," in index_text
     assert "markParentDeliveriesDelivered," in index_text
     assert "sendParentMessage:" in index_text
+    assert "options.markTerminalDeliveriesSent?.(deliveries);" in parent_delivery_text
     assert "await options.markParentDeliveriesDelivered(deliveries);" in parent_delivery_text
     assert "await options.updateTerminalNotificationState(deliveries, batchId, \"delivered\");" in parent_delivery_text
+    assert "const retryableDeliveries = sendCompleted ? deliveries.filter((delivery) => !delivery.terminalDeliveryKey) : deliveries;" in parent_delivery_text
     assert "eventIds.push(...delivery.eventIds);" in index_text
     assert "parentState.deliveredEventIds = [...delivered].slice(-500);" in index_text
     assert "deliveredEventIds: uniqueStrings([...(current.deliveredEventIds ?? []), ...(next.deliveredEventIds ?? [])]).slice(-500)," in bridge_text
+
+
+def test_runtime_invalidates_stale_terminal_deliveries_after_prune_or_bridge_cleanup() -> None:
+    """Pruned/missing bridges should clear queued terminal deliveries instead of re-emitting them."""
+    index_text = PIMUX_INDEX.read_text()
+    parent_delivery_text = (PIMUX_PACKAGE_DIR / "parent-delivery.ts").read_text()
+    bridge_text = PIMUX_BRIDGE.read_text()
+    assert "const queuedTerminalDeliveryKeys = new Set<string>();" in index_text
+    assert "const deliveredTerminalDeliveryKeys = new Set<string>();" in index_text
+    assert "const invalidatedBridgeDirs = new Set<string>();" in index_text
+    assert "const invalidatedAgentIds = new Set<string>();" in index_text
+    assert "const invalidateParentDeliveriesForBridge = (bridgeDir: string): void => {" in index_text
+    assert "watcher?.close();" in index_text
+    assert "removeQueuedParentDeliveries((delivery) => delivery.bridgeDir === bridgeDir);" in index_text
+    assert "const invalidateParentDeliveriesForStatuses = (statuses: ResolvedStatus[]): void => {" in index_text
+    assert "invalidatedAgentIds.add(status.record.agentId);" in index_text
+    assert "if (!(await bridgeRuntimeExists(entry.bridgeDir))) {" in index_text
+    assert "invalidateParentDeliveriesForBridge(entry.bridgeDir);" in index_text
+    assert "if (terminalReportPath && !(await fileExists(terminalReportPath))) {" in index_text
+    assert "buildTerminalDeliveryKey" in parent_delivery_text
+    assert "terminalDeliveryKey?: string;" in bridge_text
+    assert "terminalAgentId?: string;" in bridge_text
+    assert "terminalReportPath?: string;" in bridge_text
 
 
 def test_activity_and_ping_agent_surface_is_available() -> None:
@@ -234,8 +261,12 @@ def test_launcher_reports_startup_failures_and_exits_instead_of_dropping_to_a_sh
     assert '"--no-extensions"' in tmux_text
     assert '...params.extensionPaths.flatMap((extensionPath) => ["-e", extensionPath])' in tmux_text
     assert 'PI_EXIT_CMD=(' in tmux_text
-    assert 'tee "$PI_LOG"' in tmux_text
-    assert 'status=\\${PIPESTATUS[0]}' in tmux_text
+    assert 'export PI_TUI_WRITE_LOG="$PI_LOG"' in tmux_text
+    assert '2>&1 | tee "$PI_LOG"' not in tmux_text
+    assert 'tee "$PI_LOG"' not in tmux_text
+    assert 'PIPESTATUS' not in tmux_text
+    assert '"\\${PI_CMD[@]}" "$PROMPT" 2> >(tee -a "$PI_LOG" >&2)' in tmux_text
+    assert 'status=$?' in tmux_text
     assert '"\\${PI_EXIT_CMD[@]}" --bridge-dir' in tmux_text
     assert 'exit "$status"' in tmux_text
     assert 'exec "${SHELL:-/bin/bash}"' not in tmux_text

@@ -95,6 +95,7 @@ import {
 	type ResolvedStatus,
 } from "./registry.ts";
 import {
+	buildTerminalDeliveryKey,
 	flushQueuedParentDeliveries,
 	hasDeliveredTerminalNotification,
 	shouldNotifyInactivityWatchdog,
@@ -112,6 +113,7 @@ import {
 	getAgentLauncherPath,
 	getAgentManifestPath,
 	getAgentPromptPath,
+	getBridgeLaunchPath,
 	getBridgeSignalsDir,
 	getCurrentEnv,
 	getStateRoot,
@@ -565,6 +567,16 @@ async function ensureDirectoryExists(targetCwd: string): Promise<void> {
 	if (!stat || !stat.isDirectory()) {
 		throw new Error(`Directory not found: ${resolved}`);
 	}
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+	const stat = await fs.stat(filePath).catch(() => undefined);
+	return Boolean(stat?.isFile());
+}
+
+async function bridgeRuntimeExists(bridgeDir: string): Promise<boolean> {
+	const stat = await fs.stat(bridgeDir).catch(() => undefined);
+	return Boolean(stat?.isDirectory()) && (await fileExists(getBridgeLaunchPath(bridgeDir)));
 }
 
 async function listManagedAgents(
@@ -1125,6 +1137,7 @@ function formatPruneResultLines(result: {
 async function runPruneCommand(
 	ctx: ExtensionCommandContext,
 	options: { scope?: AgentScope; rootAgentId?: string; olderThan?: string; dryRun?: boolean } = {},
+	onPruned?: (statuses: ResolvedStatus[]) => void,
 ): Promise<void> {
 	const dryRun = options.dryRun ?? false;
 	const preview = await pruneManagedAgents(ctx, { ...options, dryRun: true, mode: "manual" });
@@ -1141,6 +1154,7 @@ async function runPruneCommand(
 		}
 	}
 	const result = await pruneManagedAgents(ctx, { ...options, dryRun: false, mode: "manual" });
+	onPruned?.(result.pruned);
 	await presentText(ctx, "pimux prune", formatPruneResultLines(result));
 }
 
@@ -1345,6 +1359,56 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 	let explicitChildInspectionRequested = false;
 	let explicitChildInstructionRequested = false;
 	let explicitChildProbeRequested = false;
+	const queuedTerminalDeliveryKeys = new Set<string>();
+	const deliveredTerminalDeliveryKeys = new Set<string>();
+	const invalidatedBridgeDirs = new Set<string>();
+	const invalidatedAgentIds = new Set<string>();
+
+	const forgetQueuedTerminalDelivery = (delivery: QueuedParentDelivery): void => {
+		if (delivery.terminalDeliveryKey) queuedTerminalDeliveryKeys.delete(delivery.terminalDeliveryKey);
+	};
+
+	const removeQueuedParentDeliveries = (predicate: (delivery: QueuedParentDelivery) => boolean): void => {
+		for (const [key, delivery] of [...parentDeliveryQueue.entries()]) {
+			if (!predicate(delivery)) continue;
+			parentDeliveryQueue.delete(key);
+			forgetQueuedTerminalDelivery(delivery);
+		}
+	};
+
+	const rememberDeliveredTerminalDeliveries = (deliveries: QueuedParentDelivery[]): void => {
+		for (const delivery of deliveries) {
+			if (!delivery.terminalDeliveryKey) continue;
+			queuedTerminalDeliveryKeys.delete(delivery.terminalDeliveryKey);
+			deliveredTerminalDeliveryKeys.add(delivery.terminalDeliveryKey);
+		}
+		while (deliveredTerminalDeliveryKeys.size > 1000) {
+			const oldest = deliveredTerminalDeliveryKeys.values().next().value;
+			if (typeof oldest !== "string") break;
+			deliveredTerminalDeliveryKeys.delete(oldest);
+		}
+	};
+
+	const invalidateParentDeliveriesForBridge = (bridgeDir: string): void => {
+		invalidatedBridgeDirs.add(bridgeDir);
+		const watcher = parentBridgeWatchers.get(bridgeDir);
+		watcher?.close();
+		parentBridgeWatchers.delete(bridgeDir);
+		removeQueuedParentDeliveries((delivery) => delivery.bridgeDir === bridgeDir);
+	};
+
+	const invalidateParentDeliveriesForStatuses = (statuses: ResolvedStatus[]): void => {
+		for (const status of statuses) {
+			invalidatedAgentIds.add(status.record.agentId);
+			if (status.record.bridgeDir) invalidateParentDeliveriesForBridge(status.record.bridgeDir);
+		}
+		removeQueuedParentDeliveries((delivery) => invalidatedAgentIds.has(delivery.agentId ?? delivery.launch.agentId));
+	};
+
+	const isParentDeliveryInvalidated = (delivery: QueuedParentDelivery): boolean => {
+		return invalidatedBridgeDirs.has(delivery.bridgeDir)
+			|| invalidatedAgentIds.has(delivery.agentId ?? delivery.launch.agentId);
+	};
 
 	const persistNoPollingSupervision = (nextState: NoPollingSupervisionState): void => {
 		noPollingSupervision = nextState;
@@ -1417,7 +1481,11 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 			const parentState = await readBridgeParentState(delivery.bridgeDir).catch(() => ({ deliveredEventIds: [] }));
 			const timestamp = nowIso();
 			parentState.terminalEventId = delivery.terminalEventId;
+			parentState.terminalDeliveryKey = delivery.terminalDeliveryKey;
+			parentState.terminalAgentId = delivery.agentId ?? delivery.launch.agentId;
+			parentState.terminalReportPath = delivery.reportPath;
 			parentState.terminalState = delivery.settledState;
+			parentState.protocolViolationReason = delivery.protocolViolationReason ?? parentState.protocolViolationReason;
 			parentState.terminalNotificationBatchId = batchId;
 			if (phase === "queued") {
 				parentState.terminalNotificationQueuedAt = timestamp;
@@ -1452,6 +1520,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 			queue: parentDeliveryQueue,
 			makeBatchId: () => `pimux-batch-${randomUUID()}`,
 			updateTerminalNotificationState,
+			markTerminalDeliveriesSent: rememberDeliveredTerminalDeliveries,
 			markParentDeliveriesDelivered,
 			sendParentMessage: (batchId, deliveries) => {
 				pi.sendMessage(
@@ -1477,6 +1546,13 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 	};
 
 	const enqueueParentDelivery = (delivery: QueuedParentDelivery, ctx: ExtensionContext): void => {
+		if (isParentDeliveryInvalidated(delivery)) return;
+		if (delivery.terminalDeliveryKey) {
+			if (queuedTerminalDeliveryKeys.has(delivery.terminalDeliveryKey) || deliveredTerminalDeliveryKeys.has(delivery.terminalDeliveryKey)) return;
+			queuedTerminalDeliveryKeys.add(delivery.terminalDeliveryKey);
+		}
+		const previous = parentDeliveryQueue.get(delivery.key);
+		if (previous) forgetQueuedTerminalDelivery(previous);
 		parentDeliveryQueue.set(delivery.key, delivery);
 		if (parentDeliveryFlushTimer) return;
 		parentDeliveryFlushTimer = setTimeout(() => {
@@ -1540,6 +1616,11 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 	};
 
 	const processBridgeDeliveriesOnce = async (bridgeDir: string, sessionKey: string, ctx: ExtensionContext) => {
+		if (invalidatedBridgeDirs.has(bridgeDir)) return;
+		if (!(await bridgeRuntimeExists(bridgeDir))) {
+			invalidateParentDeliveriesForBridge(bridgeDir);
+			return;
+		}
 		const launch = await readBridgeLaunch(bridgeDir);
 		if (launch.parentSessionKey !== sessionKey) return;
 		let parentState = await readBridgeParentState(bridgeDir);
@@ -1606,64 +1687,92 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 		}
 		if (isSettledTerminalState(settlement.settledState)) {
 			const finalizedAt = parentState.terminalFinalizedAt ?? nowIso();
+			const terminalReportPath = settlement.terminalEvent?.reportPath;
+			const terminalDeliveryKey = buildTerminalDeliveryKey({
+				bridgeDir,
+				agentId: launch.agentId,
+				settledState: settlement.settledState,
+				terminalEventId: settlement.terminalEvent?.eventId,
+				reportPath: terminalReportPath,
+				protocolViolationReason: settlement.protocolViolationReason,
+			});
 			const alreadyObserved =
 				Boolean(parentState.terminalObservedAt) &&
 				parentState.terminalState === settlement.settledState &&
 				parentState.terminalEventId === settlement.terminalEvent?.eventId &&
 				parentState.protocolViolationReason === settlement.protocolViolationReason;
-			const notificationDelivered = hasDeliveredTerminalNotification(parentState, {
+			const notificationDelivered = deliveredTerminalDeliveryKeys.has(terminalDeliveryKey) || hasDeliveredTerminalNotification(parentState, {
+				terminalDeliveryKey,
+				terminalAgentId: launch.agentId,
+				terminalReportPath,
 				terminalState: settlement.settledState,
 				terminalEventId: settlement.terminalEvent?.eventId,
 				protocolViolationReason: settlement.protocolViolationReason,
 			});
+			if (notificationDelivered) {
+				deliveredTerminalDeliveryKeys.add(terminalDeliveryKey);
+				queuedTerminalDeliveryKeys.delete(terminalDeliveryKey);
+			}
 			if (!alreadyObserved) {
 				parentState.terminalState = settlement.settledState;
 				parentState.terminalEventId = settlement.terminalEvent?.eventId;
+				parentState.terminalDeliveryKey = terminalDeliveryKey;
+				parentState.terminalAgentId = launch.agentId;
+				parentState.terminalReportPath = terminalReportPath;
 				parentState.terminalFinalizedAt = finalizedAt;
 				parentState.terminalObservedAt = finalizedAt;
 				parentState.protocolViolationReason = settlement.protocolViolationReason;
 				changed = true;
 			}
 			if (!notificationDelivered) {
-				let content: string;
-				if (settlement.terminalEvent) {
-					content = await buildParentDeliveryContent(settlement.terminalEvent, launch, {
-						terminalEventId: settlement.terminalEvent.eventId,
-						finalizedAt,
-						settledState: settlement.settledState,
-						settlementReason: settlement.protocolViolationReason,
-					});
+				if (terminalReportPath && !(await fileExists(terminalReportPath))) {
+					deliveredTerminalDeliveryKeys.add(terminalDeliveryKey);
+					queuedTerminalDeliveryKeys.delete(terminalDeliveryKey);
 				} else {
-					content = buildProtocolViolationDeliveryContent(
-						launch,
-						finalizedAt,
-						settlement.protocolViolationReason ?? "Child exited without a valid terminal declaration.",
+					let content: string;
+					if (settlement.terminalEvent) {
+						content = await buildParentDeliveryContent(settlement.terminalEvent, launch, {
+							terminalEventId: settlement.terminalEvent.eventId,
+							finalizedAt,
+							settledState: settlement.settledState,
+							settlementReason: settlement.protocolViolationReason,
+						});
+					} else {
+						content = buildProtocolViolationDeliveryContent(
+							launch,
+							finalizedAt,
+							settlement.protocolViolationReason ?? "Child exited without a valid terminal declaration.",
+						);
+					}
+					enqueueParentDelivery(
+						{
+							key: terminalDeliveryKey,
+							bridgeDir,
+							launch,
+							content,
+							triggerTurn: shouldTriggerTurnForSettledState(settlement.settledState, launch),
+							eventIds: settlement.terminalEvent ? [settlement.terminalEvent.eventId] : [],
+							agentId: launch.agentId,
+							reportPath: terminalReportPath,
+							terminalDeliveryKey,
+							terminalEventId: settlement.terminalEvent?.eventId,
+							settledState: settlement.settledState,
+							protocolViolationReason: settlement.protocolViolationReason,
+							createdAt: finalizedAt,
+						},
+						ctx,
 					);
+					nextLock = updateControlPlaneLockForTerminalSettlement(nextLock, {
+						agentId: launch.agentId,
+						eventId: settlement.terminalEvent?.eventId,
+						timestamp: finalizedAt,
+					});
+					nextSupervision = updateNoPollingSupervisionForTerminalSettlement(nextSupervision, {
+						agentId: launch.agentId,
+						eventId: settlement.terminalEvent?.eventId,
+						timestamp: finalizedAt,
+					});
 				}
-				enqueueParentDelivery(
-					{
-						key: `settlement:${bridgeDir}:${settlement.terminalEvent?.eventId ?? settlement.settledState}`,
-						bridgeDir,
-						launch,
-						content,
-						triggerTurn: shouldTriggerTurnForSettledState(settlement.settledState, launch),
-						eventIds: settlement.terminalEvent ? [settlement.terminalEvent.eventId] : [],
-						terminalEventId: settlement.terminalEvent?.eventId,
-						settledState: settlement.settledState,
-						createdAt: finalizedAt,
-					},
-					ctx,
-				);
-				nextLock = updateControlPlaneLockForTerminalSettlement(nextLock, {
-					agentId: launch.agentId,
-					eventId: settlement.terminalEvent?.eventId,
-					timestamp: finalizedAt,
-				});
-				nextSupervision = updateNoPollingSupervisionForTerminalSettlement(nextSupervision, {
-					agentId: launch.agentId,
-					eventId: settlement.terminalEvent?.eventId,
-					timestamp: finalizedAt,
-				});
 			}
 		}
 		if (nextLock && nextLock !== currentLock) {
@@ -1699,7 +1808,12 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 	};
 
 	const subscribeParentBridge = async (bridgeDir: string, ctx: ExtensionContext) => {
+		if (invalidatedBridgeDirs.has(bridgeDir)) return;
 		if (parentBridgeWatchers.has(bridgeDir)) return;
+		if (!(await bridgeRuntimeExists(bridgeDir))) {
+			invalidateParentDeliveriesForBridge(bridgeDir);
+			return;
+		}
 		await fs.mkdir(getBridgeSignalsDir(bridgeDir), { recursive: true });
 		const watcher = watchFs(getBridgeSignalsDir(bridgeDir), { persistent: false }, () => {
 			runBackgroundTask(processBridgeDeliveries(bridgeDir, getSessionKey(ctx), ctx));
@@ -1710,6 +1824,11 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 	const reconcileParentBridgeWatchers = async (ctx: ExtensionContext) => {
 		const desired = new Set<string>();
 		for (const entry of getSessionBridgeEntries(ctx)) {
+			if (invalidatedBridgeDirs.has(entry.bridgeDir)) continue;
+			if (!(await bridgeRuntimeExists(entry.bridgeDir))) {
+				invalidateParentDeliveriesForBridge(entry.bridgeDir);
+				continue;
+			}
 			desired.add(entry.bridgeDir);
 			await subscribeParentBridge(entry.bridgeDir, ctx);
 			await processBridgeDeliveries(entry.bridgeDir, getSessionKey(ctx), ctx);
@@ -2211,7 +2330,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 					rootAgentId: getStringFlag(parsed, "root"),
 					olderThan: getStringFlag(parsed, "older-than"),
 					dryRun: hasFlag(parsed, "dry-run"),
-				});
+				}, invalidateParentDeliveriesForStatuses);
 				return;
 			}
 			case "unlock": {
@@ -2321,7 +2440,8 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 		await fs.mkdir(stateRoot, { recursive: true });
 		const currentEnv = getCurrentEnv();
 		if (!currentEnv.agentId) {
-			await pruneManagedAgents(ctx, { scope: "all", olderThan: "1d", dryRun: false, mode: "auto" });
+			const autoPruneResult = await pruneManagedAgents(ctx, { scope: "all", olderThan: "1d", dryRun: false, mode: "auto" });
+			invalidateParentDeliveriesForStatuses(autoPruneResult.pruned);
 		}
 		let shouldShutdownTerminatedAgent = false;
 		if (currentEnv.agentId) {
@@ -2560,6 +2680,7 @@ export default function pimuxExtension(pi: ExtensionAPI) {
 							dryRun: params.dryRun ?? false,
 							mode: "manual",
 						});
+						invalidateParentDeliveriesForStatuses(result.pruned);
 						return buildToolResult(formatPruneResultLines(result).join("\n"), {
 							action: params.action,
 							scope: result.scope,

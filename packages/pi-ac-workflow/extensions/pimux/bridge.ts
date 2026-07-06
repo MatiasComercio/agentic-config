@@ -76,6 +76,9 @@ export interface BridgeEvent {
 export interface BridgeParentState {
 	deliveredEventIds: string[];
 	terminalEventId?: string;
+	terminalDeliveryKey?: string;
+	terminalAgentId?: string;
+	terminalReportPath?: string;
 	terminalFinalizedAt?: string;
 	terminalObservedAt?: string;
 	terminalState?: BridgeSettlementState;
@@ -169,6 +172,9 @@ function mergeBridgeParentState(current: BridgeParentState, next: BridgeParentSt
 		...next,
 		deliveredEventIds: uniqueStrings([...(current.deliveredEventIds ?? []), ...(next.deliveredEventIds ?? [])]).slice(-500),
 		terminalEventId: next.terminalEventId ?? current.terminalEventId,
+		terminalDeliveryKey: next.terminalDeliveryKey ?? current.terminalDeliveryKey,
+		terminalAgentId: next.terminalAgentId ?? current.terminalAgentId,
+		terminalReportPath: next.terminalReportPath ?? current.terminalReportPath,
 		terminalFinalizedAt: preferLatestIso(current.terminalFinalizedAt, next.terminalFinalizedAt),
 		terminalObservedAt: preferLatestIso(current.terminalObservedAt, next.terminalObservedAt),
 		terminalState: preferTerminalState(current.terminalState, next.terminalState),
