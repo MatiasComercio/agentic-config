@@ -1,7 +1,7 @@
 {
   "name": "ac-safety",
   "description": "Security guardrails - credential protection, destructive command blocking, write scope enforcement, supply chain control, browser restrictions",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "author": {
     "name": "Agentic Config Contributors"
   },
