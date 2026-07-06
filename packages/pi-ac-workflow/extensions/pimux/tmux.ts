@@ -274,8 +274,9 @@ PROMPT=$(cat ${shellQuote(params.promptPath)})
 PI_CMD=(${shellArray(commandParts)})
 PI_EXIT_CMD=(${shellArray(launcherExitCommandParts)})
 PI_LOG=${shellQuote(launcherLogPath)}
-"\${PI_CMD[@]}" "$PROMPT" 2>&1 | tee "$PI_LOG"
-status=\${PIPESTATUS[0]}
+export PI_TUI_WRITE_LOG="$PI_LOG"
+"\${PI_CMD[@]}" "$PROMPT" 2> >(tee -a "$PI_LOG" >&2)
+status=$?
 printf '\n[pi exited with status %s]\n' "$status"
 "\${PI_EXIT_CMD[@]}" --bridge-dir ${shellQuote(params.bridgeDir)} --exit-status "$status" --log-path "$PI_LOG" || true
 exit "$status"
