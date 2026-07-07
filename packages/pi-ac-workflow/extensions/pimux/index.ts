@@ -998,8 +998,9 @@ async function reportParent(
 		}
 	}
 	let reportPath: string | undefined;
-	if (request.reportMarkdown?.trim()) {
-		const report = await writeBridgeReport(currentEnv.bridgeDir, request.kind, request.reportMarkdown);
+	const reportMarkdown = request.reportMarkdown?.trim();
+	if (request.kind === "closeout" || reportMarkdown) {
+		const report = await writeBridgeReport(currentEnv.bridgeDir, request.kind, reportMarkdown ?? "", request.summary);
 		reportPath = report.reportPath;
 	}
 	const launch = await readBridgeLaunch(currentEnv.bridgeDir);
