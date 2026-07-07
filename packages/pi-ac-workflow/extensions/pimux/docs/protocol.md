@@ -10,6 +10,16 @@ Package-owned runtime protocol docs for the `pimux` extension command, tool, bri
 - ordinary child `progress` is notification-only unless `requiresResponse=true`
 - one hop only: L2 reports to L1, L1 reports to L0
 
+## Report shape
+
+Closeout reports must be useful from the parent delivery summary alone. The runtime now persists a closeout report artifact even when the child only provides a short summary, and normalizes saved reports so they include:
+
+- `## Table of Contents`
+- `## Executive Summary`
+- a next-step recommendation for the parent/orchestrator
+
+Children should still provide `reportMarkdown` with evidence whenever possible; normalization is a safety net, not a substitute for good closeout content.
+
 ## Authority model
 
 Only the authoritative direct child session for a bridge may call `report_parent`.

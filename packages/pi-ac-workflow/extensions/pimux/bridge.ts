@@ -369,14 +369,78 @@ export async function nextBridgeReportNumber(bridgeDir: string): Promise<number>
 	});
 }
 
+function formatReportKind(kind: ReportParentKind): string {
+	return kind.charAt(0).toUpperCase() + kind.slice(1);
+}
+
+function hasTableOfContentsSection(content: string): boolean {
+	return /^##\s+Table of Contents\b/im.test(content);
+}
+
+function hasExecutiveSummarySection(content: string): boolean {
+	return /^##\s+Executive Summary\b/im.test(content);
+}
+
+function resolveExecutiveSummary(kind: ReportParentKind, summary: string, markdown: string): string {
+	const trimmedSummary = summary.trim();
+	if (trimmedSummary) return trimmedSummary;
+	const extractedSummary = extractExecutiveSummary(markdown).trim();
+	if (extractedSummary && extractedSummary !== "No Executive Summary section found") return extractedSummary;
+	const trimmedMarkdown = markdown.trim();
+	if (trimmedMarkdown) return trimmedMarkdown;
+	return `${formatReportKind(kind)} report emitted without additional detail.`;
+}
+
+function defaultReportNextSteps(kind: ReportParentKind): string[] {
+	if (kind === "closeout") return ["- Parent can consume this closeout and continue orchestration."];
+	if (kind === "progress") return ["- Continue work or wait for the next progress or terminal report."];
+	if (kind === "question") return ["- Parent should answer the terminal question before expecting further progress."];
+	if (kind === "blocker") return ["- Parent should review the blocker details and choose a recovery path."];
+	return ["- Parent should review the failure details and decide whether to recover or stop."];
+}
+
+export function normalizeBridgeReportMarkdown(kind: ReportParentKind, summary: string, markdown: string): string {
+	const trimmedMarkdown = markdown.trim();
+	if (trimmedMarkdown && hasTableOfContentsSection(trimmedMarkdown) && hasExecutiveSummarySection(trimmedMarkdown)) {
+		return trimmedMarkdown;
+	}
+
+	const kindLabel = formatReportKind(kind);
+	const detailsHeading = `${kindLabel} Details`;
+	const executiveSummary = resolveExecutiveSummary(kind, summary, trimmedMarkdown);
+	return [
+		`# Pimux ${kindLabel} Report`,
+		"",
+		"## Table of Contents",
+		"- [Executive Summary](#executive-summary)",
+		"- [Next Steps](#next-steps)",
+		trimmedMarkdown ? `- [${detailsHeading}](#${kind}-details)` : undefined,
+		"",
+		"## Executive Summary",
+		executiveSummary,
+		"",
+		"### Next Steps",
+		...defaultReportNextSteps(kind),
+		trimmedMarkdown ? "" : undefined,
+		trimmedMarkdown ? `## ${detailsHeading}` : undefined,
+		trimmedMarkdown ? "" : undefined,
+		trimmedMarkdown || undefined,
+	]
+		.filter((line): line is string => line !== undefined)
+		.join("\n")
+		.trimEnd();
+}
+
 export async function writeBridgeReport(
 	bridgeDir: string,
 	kind: ReportParentKind,
 	markdown: string,
+	summary = "",
 ): Promise<{ reportPath: string; reportNumber: number }> {
 	const reportNumber = await nextBridgeReportNumber(bridgeDir);
 	const reportPath = path.join(getBridgeReportsDir(bridgeDir), `${String(reportNumber).padStart(3, "0")}-${kind}.md`);
-	await writeTextFileAtomic(reportPath, markdown.trimEnd() + "\n");
+	const normalizedMarkdown = normalizeBridgeReportMarkdown(kind, summary, markdown);
+	await writeTextFileAtomic(reportPath, normalizedMarkdown.trimEnd() + "\n");
 	return { reportPath, reportNumber };
 }
 
@@ -464,6 +528,7 @@ export function buildChildProtocol(launch: BridgeLaunchFile): string {
 		"Messaging contract:",
 		"- Keep reports bounded and decision-oriented.",
 		"- Include status, delivered work, blockers, and next recommendation in summaries.",
+		"- For closeout, include reportMarkdown with evidence and a `## Executive Summary` whenever possible; the runtime normalizes missing report structure for parent routing.",
 		"- Use requiresResponse=true on progress when the parent must answer before you can continue.",
 		launch.goal ? `Launch goal: ${launch.goal}` : `Launch goal: ${launch.promptPreview}`,
 		launch.role ? `Launch role: ${launch.role}` : undefined,

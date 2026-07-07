@@ -75,14 +75,15 @@ export async function reportManagedLauncherExit(params: {
 				: undefined,
 		]
 			.filter((line): line is string => Boolean(line));
-		const { reportPath } = await writeBridgeReport(params.bridgeDir, "failure", reportLines.join("\n"));
+		const failureSummary = `${launch.agentId} exited before terminal handoff (status ${params.exitStatus})`;
+		const { reportPath } = await writeBridgeReport(params.bridgeDir, "failure", reportLines.join("\n"), failureSummary);
 		const failureEvent = await appendBridgeEvent(params.bridgeDir, {
 			launchId: launch.launchId,
 			direction: "child_to_parent",
 			type: "failure",
 			from: { agentId: launch.agentId, sessionName: launch.sessionName },
 			to: launch.parentAgentId ? { agentId: launch.parentAgentId } : undefined,
-			summary: `${launch.agentId} exited before terminal handoff (status ${params.exitStatus})`,
+			summary: failureSummary,
 			reportPath,
 		});
 		await writeBridgeEventSignal(params.bridgeDir, failureEvent, true);

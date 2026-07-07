@@ -4,6 +4,10 @@ All notable changes to agentic-config.
 
 ## [Unreleased]
 
+### Fixed
+
+- `pi-ac-workflow`: normalize `pimux` closeout report artifacts so parent deliveries always expose a Table of Contents and Executive Summary, even when a child only supplies a plain summary.
+
 ## [0.3.2] - 2026-07-06
 
 ### Changed
