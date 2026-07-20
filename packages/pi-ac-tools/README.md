@@ -67,7 +67,8 @@ The `say` and `web-search` extensions are agentic-config package extensions. The
 - package-local `web-search` extension under `extensions/web-search/`
 - exports the `web_search` grounded web research tool plus `/web-search-status`, `/web-search-lock`, `/web-search-setup`, `/web-search-auth`, and `/web-search-backend`
 - `/web-search-backend status|brave-search|codex-search|claude-search` persists the selected default backend and runs it first before falling back through the remaining backends
-- Brave Search requires `BRAVE_SEARCH_API_KEY` or the Pi auth store via `/web-search-setup`; Codex and Claude backends use the corresponding Pi-configured providers when available
+- Brave Search requires `BRAVE_SEARCH_API_KEY` or the extension-owned, owner-only auth file configured via `/web-search-setup`; Codex and Claude backends use the corresponding Pi-configured providers when available
+- Keys previously saved under the removed Pi `AuthStorage` integration must be saved once in the extension-owned file with `/web-search-setup`
 
 ### Deferred surface
 - none
