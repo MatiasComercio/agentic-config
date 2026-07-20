@@ -1,11 +1,12 @@
-import { join } from "node:path";
-import { AuthStorage, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { randomUUID } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { RuntimeState } from "./types.js";
+import type { BraveAuthStorage, RuntimeState } from "./types.js";
 
-export const BRAVE_AUTH_PROVIDER = "web-search-brave";
 export const BRAVE_ENV_VAR = "BRAVE_SEARCH_API_KEY";
-export const BRAVE_AUTH_PATH = join(getAgentDir(), "auth.json");
+export const BRAVE_AUTH_PATH = join(getAgentDir(), "web-search", "auth.json");
 
 export interface BraveAuthStatus {
   envConfigured: boolean;
@@ -13,13 +14,65 @@ export interface BraveAuthStatus {
   activeSource: "env" | "auth.json" | "none";
 }
 
-export function createAuthStorage(): AuthStorage {
-  return AuthStorage.create();
+interface BraveAuthFile {
+  api_key?: unknown;
 }
 
-export function getBraveAuthStatus(authStorage: AuthStorage): BraveAuthStatus {
+class FileBraveAuthStorage implements BraveAuthStorage {
+  private apiKey: string | undefined;
+
+  constructor(private readonly path: string) {
+    this.reload();
+  }
+
+  reload(): void {
+    if (!existsSync(this.path)) {
+      this.apiKey = undefined;
+      return;
+    }
+
+    const parsed = JSON.parse(readFileSync(this.path, "utf8")) as BraveAuthFile;
+    this.apiKey = normalizeSecret(parsed.api_key);
+  }
+
+  hasApiKey(): boolean {
+    return this.apiKey !== undefined;
+  }
+
+  getApiKey(): string | undefined {
+    return this.apiKey;
+  }
+
+  setApiKey(apiKey: string): void {
+    const directory = dirname(this.path);
+    const tempPath = join(directory, `.auth-${process.pid}-${randomUUID()}.tmp`);
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    chmodSync(directory, 0o700);
+
+    try {
+      const payload = `${JSON.stringify({ api_key: apiKey }, null, 2)}\n`;
+      writeFileSync(tempPath, payload, { encoding: "utf8", flag: "wx", mode: 0o600 });
+      renameSync(tempPath, this.path);
+      chmodSync(this.path, 0o600);
+      this.apiKey = apiKey;
+    } finally {
+      rmSync(tempPath, { force: true });
+    }
+  }
+
+  clear(): void {
+    rmSync(this.path, { force: true });
+    this.apiKey = undefined;
+  }
+}
+
+export function createAuthStorage(): BraveAuthStorage {
+  return new FileBraveAuthStorage(BRAVE_AUTH_PATH);
+}
+
+export function getBraveAuthStatus(authStorage: BraveAuthStorage): BraveAuthStatus {
   const envConfigured = Boolean(normalizeSecret(process.env[BRAVE_ENV_VAR]));
-  const authConfigured = authStorage.has(BRAVE_AUTH_PROVIDER);
+  const authConfigured = authStorage.hasApiKey();
 
   return {
     envConfigured,
@@ -29,7 +82,7 @@ export function getBraveAuthStatus(authStorage: AuthStorage): BraveAuthStatus {
 }
 
 export async function resolveBraveApiKey(
-  authStorage: AuthStorage,
+  authStorage: BraveAuthStorage,
   ctx: ExtensionContext | undefined,
   runtime: RuntimeState,
 ): Promise<string | undefined> {
@@ -40,7 +93,7 @@ export async function resolveBraveApiKey(
     return envKey;
   }
 
-  const savedKey = normalizeSecret(await authStorage.getApiKey(BRAVE_AUTH_PROVIDER, { includeFallback: false }));
+  const savedKey = normalizeSecret(authStorage.getApiKey());
   if (savedKey) {
     return savedKey;
   }
@@ -52,32 +105,29 @@ export async function resolveBraveApiKey(
     return envKeyAfterPrompt;
   }
 
-  return normalizeSecret(await authStorage.getApiKey(BRAVE_AUTH_PROVIDER, { includeFallback: false }));
+  return normalizeSecret(authStorage.getApiKey());
 }
 
-export function setBraveApiKey(authStorage: AuthStorage, apiKey: string): void {
+export function setBraveApiKey(authStorage: BraveAuthStorage, apiKey: string): void {
   const normalized = normalizeSecret(apiKey);
   if (!normalized) {
     throw new Error("Brave Search API key must not be empty.");
   }
 
-  authStorage.set(BRAVE_AUTH_PROVIDER, {
-    type: "api_key",
-    key: normalized,
-  });
+  authStorage.setApiKey(normalized);
 }
 
-export function clearBraveApiKey(authStorage: AuthStorage): void {
-  authStorage.remove(BRAVE_AUTH_PROVIDER);
+export function clearBraveApiKey(authStorage: BraveAuthStorage): void {
+  authStorage.clear();
 }
 
-export function formatBraveAuthStatus(authStorage: AuthStorage): string {
+export function formatBraveAuthStatus(authStorage: BraveAuthStorage): string {
   const status = getBraveAuthStatus(authStorage);
 
   return [
     "web-search auth",
     `- ${BRAVE_ENV_VAR}: ${status.envConfigured ? "configured" : "not configured"}`,
-    `- ${BRAVE_AUTH_PATH} (${BRAVE_AUTH_PROVIDER}): ${status.authConfigured ? "configured" : "not configured"}`,
+    `- ${BRAVE_AUTH_PATH}: ${status.authConfigured ? "configured" : "not configured"}`,
     `- active source: ${status.activeSource}`,
   ].join("\n");
 }
@@ -85,18 +135,17 @@ export function formatBraveAuthStatus(authStorage: AuthStorage): string {
 export function missingBraveKeySetupHint(): string {
   return [
     "Brave Search API key is not configured.",
-    `Set ${BRAVE_ENV_VAR} or store the key in ${BRAVE_AUTH_PATH} under ${BRAVE_AUTH_PROVIDER}.`,
-    "Use /web-search-setup for guided setup.",
+    `Set ${BRAVE_ENV_VAR} or use /web-search-setup to save the key in ${BRAVE_AUTH_PATH}.`,
   ].join(" ");
 }
 
 export async function runInteractiveBraveSetup(
-  authStorage: AuthStorage,
+  authStorage: BraveAuthStorage,
   ctx: ExtensionContext,
   runtime: RuntimeState,
 ): Promise<string> {
   const status = getBraveAuthStatus(authStorage);
-  const saveLabel = status.authConfigured ? "Replace saved key in Pi auth store" : "Save key in Pi auth store";
+  const saveLabel = status.authConfigured ? "Replace saved key" : "Save key";
   const choice = await ctx.ui.select("Configure Brave Search", [
     saveLabel,
     "Use environment variable instead",
@@ -128,11 +177,11 @@ export async function runInteractiveBraveSetup(
   }
 
   setBraveApiKey(authStorage, normalized);
-  return `Saved Brave Search API key in ${BRAVE_AUTH_PATH}. This file uses Pi's auth store and is kept outside the project.`;
+  return `Saved Brave Search API key in ${BRAVE_AUTH_PATH}. The file is kept outside projects with owner-only permissions.`;
 }
 
 async function maybePromptForBraveSetup(
-  authStorage: AuthStorage,
+  authStorage: BraveAuthStorage,
   ctx: ExtensionContext | undefined,
   runtime: RuntimeState,
 ): Promise<void> {

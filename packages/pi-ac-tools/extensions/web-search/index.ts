@@ -3,7 +3,6 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import {
   BRAVE_AUTH_PATH,
-  BRAVE_AUTH_PROVIDER,
   BRAVE_ENV_VAR,
   clearBraveApiKey,
   createAuthStorage,
@@ -65,14 +64,6 @@ export default function webSearchExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    await resetSessionState(ctx);
-  });
-
-  pi.on("session_switch", async (_event, ctx) => {
-    await resetSessionState(ctx);
-  });
-
-  pi.on("session_fork", async (_event, ctx) => {
     await resetSessionState(ctx);
   });
 
@@ -150,7 +141,7 @@ export default function webSearchExtension(pi: ExtensionAPI): void {
 
       if (!ctx.hasUI) {
         ctx.ui.notify(
-          `No interactive UI is available. Set ${BRAVE_ENV_VAR} before starting pi, or store the key in ${BRAVE_AUTH_PATH} under ${BRAVE_AUTH_PROVIDER}.`,
+          `No interactive UI is available. Set ${BRAVE_ENV_VAR} before starting pi, or use /web-search-setup in interactive mode to save the key in ${BRAVE_AUTH_PATH}.`,
           "info",
         );
         return;

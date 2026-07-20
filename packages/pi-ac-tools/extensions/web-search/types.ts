@@ -1,5 +1,3 @@
-import type { AuthStorage } from "@earendil-works/pi-coding-agent";
-
 export const BACKEND_NAMES = ["brave-search", "codex-search", "claude-search"] as const;
 export type BackendName = (typeof BACKEND_NAMES)[number];
 
@@ -114,6 +112,14 @@ export interface BraveUsageState {
   requests_used_this_month: number;
 }
 
+export interface BraveAuthStorage {
+  reload(): void;
+  hasApiKey(): boolean;
+  getApiKey(): string | undefined;
+  setApiKey(apiKey: string): void;
+  clear(): void;
+}
+
 export interface SessionStats {
   tool_calls_total: number;
   cache_hits_total: number;
@@ -127,7 +133,7 @@ export interface RuntimeState {
   inFlight: Map<string, Promise<ToolResultPayload>>;
   lockState: LockState;
   stats: SessionStats;
-  authStorage: AuthStorage;
+  authStorage: BraveAuthStorage;
   braveSetupPromptShown: boolean;
   braveUsage: BraveUsageState;
   braveLane: Promise<void>;
