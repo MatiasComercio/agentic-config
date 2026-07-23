@@ -295,9 +295,15 @@ def test_spawn_suppresses_dispatch_when_settlement_verification_is_pending() -> 
 def test_spawn_forwards_explicit_thinking_effort_to_child_pi() -> None:
     """pimux spawn should expose and forward Pi's standalone --thinking effort flag."""
     index_text = PIMUX_INDEX.read_text()
+    paths_text = (PIMUX_PACKAGE_DIR / "paths.ts").read_text()
     schema_text = (PIMUX_PACKAGE_DIR / "schema.ts").read_text()
     tmux_text = PIMUX_TMUX.read_text()
+    commands_text = (PIMUX_PACKAGE_DIR / "docs" / "commands.md").read_text()
+    assert '"off", "minimal", "low", "medium", "high", "xhigh", "max"' in paths_text
     assert "THINKING_EFFORT_LEVELS" in schema_text
+    assert "xhigh, or max" in schema_text
+    assert "`xhigh`, and `max`" in commands_text
+    assert "--thinking max" in commands_text
     assert "[--thinking LEVEL]" in index_text
     assert 'thinking: normalizeThinkingEffort(getStringFlag(parsed, "thinking"))' in index_text
     assert "thinking: params.thinking" in index_text

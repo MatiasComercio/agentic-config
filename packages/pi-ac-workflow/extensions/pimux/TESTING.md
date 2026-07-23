@@ -12,9 +12,9 @@ pytest -q tests/test_pimux_*.py
 
 Latest observed result:
 
-- Date: 2026-05-01
-- Result: `93 passed in 9.03s`
-- Notes: includes parent-delivery retry/ack behavior, live-open guard behavior, and wrapper clean-exit guidance checks
+- Date: 2026-07-23
+- Result: `110 passed in 14.98s`
+- Notes: includes literal `max` thinking-effort forwarding, parent-delivery retry/ack behavior, live-open guard behavior, and wrapper clean-exit guidance checks
 
 ## Automated test coverage
 
