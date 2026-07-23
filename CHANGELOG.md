@@ -6,6 +6,7 @@ All notable changes to agentic-config.
 
 ### Fixed
 
+- `pi-ac-workflow`: allow `pimux` subagents to receive Pi's literal `max` thinking effort without substituting `xhigh`.
 - `pi-ac-workflow`: normalize `pimux` closeout report artifacts so parent deliveries always expose a Table of Contents and Executive Summary, even when a child only supplies a plain summary.
 - `pi-ac-tools`: restore web-search extension startup on Pi 0.80.8+ by replacing the removed `AuthStorage` API with an extension-owned, owner-only Brave key file; keys previously saved through the old integration must be saved once with `/web-search-setup`.
 

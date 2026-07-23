@@ -56,10 +56,10 @@ Spawned pimux children always use `notify-and-follow-up`.
 
 ## Thinking effort
 
-Use `--thinking` to pass Pi's thinking effort flag to spawned children. Valid levels are `off`, `minimal`, `low`, `medium`, `high`, and `xhigh`.
+Use `--thinking` to pass Pi's thinking effort flag to spawned children. Valid levels are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`.
 
 ```text
-/pimux spawn --model openai-codex/gpt-5.3-codex --thinking high "Plan the migration and report the risks."
+/pimux spawn --model openai-codex/gpt-5.5 --thinking max "Plan the migration and report the risks."
 ```
 
 The `--model provider/model:thinking` shortcut remains supported by Pi, but `--thinking` is preferred when model identity and effort should stay separate.
